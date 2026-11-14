@@ -21,18 +21,18 @@ public class AuthService
     private static readonly SemaphoreSlim SchemaLock = new(1, 1);
     private static volatile bool _schemaLista;
 
-    private readonly string _connectionString;
+    private readonly IConfiguration _configuration;
     private readonly AuditService _audit;
     private readonly ILogger<AuthService> _logger;
 
     public AuthService(IConfiguration configuration, AuditService audit, ILogger<AuthService> logger)
     {
-        _connectionString = PostgresConnectionResolver.Resolve(configuration);
+        _configuration = configuration;
         _audit = audit;
         _logger = logger;
     }
 
-    private NpgsqlConnection Crear() => new(_connectionString);
+    private NpgsqlConnection Crear() => new(PostgresConnectionResolver.Resolve(_configuration));
 
     /// <summary>Columnas de seguridad y tabla de auditoría (idempotente, una sola vez por proceso).</summary>
     public async Task EnsureSchemaAsync()

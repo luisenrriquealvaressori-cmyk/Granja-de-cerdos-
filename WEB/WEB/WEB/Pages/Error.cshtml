@@ -1,26 +1,83 @@
 ﻿@page
 @model ErrorModel
 @{
-    ViewData["Title"] = "Error";
+    ViewData["Title"] = "Error del Servicio";
+    Layout = null;
 }
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - AgroPig Intelligence Suite</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: #f3f5f1;
+            color: #1a1c1e;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            background: #ffffff;
+            border: 1px solid #d9ded3;
+            border-radius: 14px;
+            max-width: 540px;
+            width: 100%;
+            padding: 28px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+        }
+        h1 { margin: 0 0 10px; font-size: 1.35rem; color: #3f4b2c; }
+        p { line-height: 1.55; margin: 10px 0; color: #43483f; font-size: 0.95rem; }
+        code {
+            background: #eef1ea;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        .hint {
+            background: #f8faf5;
+            border-left: 4px solid #566342;
+            padding: 12px 14px;
+            border-radius: 6px;
+            margin-top: 16px;
+            font-size: 0.88rem;
+        }
+        .actions { margin-top: 20px; display: flex; gap: 12px; }
+        .btn {
+            display: inline-block;
+            background: #566342;
+            color: #ffffff;
+            text-decoration: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .btn:hover { background: #3f4b2c; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>No se pudo procesar la solicitud</h1>
+        <p>Ocurrió un inconveniente temporal al conectar con el servicio de datos de la granja.</p>
 
-<h1 class="text-danger">Error.</h1>
-<h2 class="text-danger">An error occurred while processing your request.</h2>
+        @if (Model.ShowRequestId)
+        {
+            <p><strong>ID de solicitud:</strong> <code>@Model.RequestId</code></p>
+        }
 
-@if (Model.ShowRequestId)
-{
-    <p>
-        <strong>Request ID:</strong> <code>@Model.RequestId</code>
-    </p>
-}
+        <div class="hint">
+            <strong>Para el administrador (Render):</strong> si el error persiste tras iniciar sesión o abrir la consola, verifica en el panel de Render que la variable de entorno <code>DATABASE_URL</code> contenga la cadena de conexión válida de PostgreSQL / Neon (con <code>sslmode=require</code>) y revisa los logs del servicio.
+        </div>
 
-<h3>Development Mode</h3>
-<p>
-    Swapping to the <strong>Development</strong> environment displays detailed information about the error that occurred.
-</p>
-<p>
-    <strong>The Development environment shouldn't be enabled for deployed applications.</strong>
-    It can result in displaying sensitive information from exceptions to end users.
-    For local debugging, enable the <strong>Development</strong> environment by setting the <strong>ASPNETCORE_ENVIRONMENT</strong> environment variable to <strong>Development</strong>
-    and restarting the app.
-</p>
+        <div class="actions">
+            <a class="btn" href="/Login">Ir al inicio de sesión</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -5,7 +5,7 @@ namespace WEB.Services;
 
 public class AgroPigDataService
 {
-    private readonly string _connectionString;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AgroPigDataService> _logger;
     private readonly IHttpContextAccessor _http;
 
@@ -16,10 +16,12 @@ public class AgroPigDataService
     public AgroPigDataService(IConfiguration configuration, ILogger<AgroPigDataService> logger, IHttpContextAccessor httpContextAccessor)
     {
         // Sin credenciales por defecto en código: configure ConnectionStrings:PostgreSQL o DATABASE_URL en user-secrets/variables de entorno
-        _connectionString = WEB.Security.PostgresConnectionResolver.Resolve(configuration);
+        _configuration = configuration;
         _logger = logger;
         _http = httpContextAccessor;
     }
+
+    private string _connectionString => WEB.Security.PostgresConnectionResolver.Resolve(_configuration);
 
     /// <summary>Id del usuario autenticado (para trazabilidad responsable_id / registrado_por_id). Null si no hay sesión (p.ej. tareas internas).</summary>
     private Guid? CurrentUserId => WEB.Security.ClaimsExtensions.GetUserId(_http.HttpContext?.User ?? new System.Security.Claims.ClaimsPrincipal());

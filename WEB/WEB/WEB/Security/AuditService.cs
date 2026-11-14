@@ -8,12 +8,12 @@ namespace WEB.Security;
 /// </summary>
 public class AuditService
 {
-    private readonly string _connectionString;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AuditService> _logger;
 
     public AuditService(IConfiguration configuration, ILogger<AuditService> logger)
     {
-        _connectionString = PostgresConnectionResolver.Resolve(configuration);
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -21,7 +21,8 @@ public class AuditService
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
+            var connectionString = PostgresConnectionResolver.Resolve(_configuration);
+            await using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
             await using var cmd = new NpgsqlCommand(@"
                 INSERT INTO audit_log (usuario_id, email, accion, entidad, detalle, ip)
