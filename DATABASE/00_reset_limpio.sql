@@ -693,7 +693,7 @@ WITH resumen_costos AS (
         l.cantidad_actual,
         (l.peso_actual_total_kg - l.peso_ingreso_total_kg) AS kg_ganados_lote,
         COALESCE(SUM(g.monto_total_usd), 0) AS total_gastos_operativos_usd,
-        COALESCE(SUM(k.costo_total_usd), 0) AS total_costo_alimento_kardex_usd
+        COALESCE(SUM(k.valor_total_usd), 0) AS total_costo_alimento_kardex_usd
     FROM lotes_produccion l
     LEFT JOIN gastos_operativos_transacciones g ON g.lote_id = l.id
     LEFT JOIN movimientos_kardex k ON k.lote_id = l.id AND k.tipo_movimiento LIKE 'salida%'

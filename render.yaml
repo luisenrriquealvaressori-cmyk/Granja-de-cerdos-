@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: agropig-web
+    runtime: docker
+    plan: free
+    dockerContext: ./WEB/WEB
+    dockerfilePath: ./WEB/WEB/WEB/Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: PORT
+        value: "8080"
+      - key: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+        value: "true"
+      - key: Jwt__Key
+        generateValue: true
+      - key: Jwt__Issuer
+        value: AgroPig.Web
+      - key: Jwt__Audience
+        value: AgroPig.Movil
+      - key: DATABASE_URL
+        sync: false
+
+  - type: web
+    name: agropig-api
+    runtime: docker
+    plan: free
+    dockerContext: ./API/API
+    dockerfilePath: ./API/API/API/Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: PORT
+        value: "8080"
+      - key: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+        value: "true"
+      - key: DATABASE_URL
+        sync: false

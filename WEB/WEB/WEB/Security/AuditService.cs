@@ -13,8 +13,7 @@ public class AuditService
 
     public AuditService(IConfiguration configuration, ILogger<AuditService> logger)
     {
-        _connectionString = configuration.GetConnectionString("PostgreSQL")
-            ?? throw new InvalidOperationException("Falta la cadena de conexión 'ConnectionStrings:PostgreSQL' (use user-secrets o variables de entorno).");
+        _connectionString = PostgresConnectionResolver.Resolve(configuration);
         _logger = logger;
     }
 

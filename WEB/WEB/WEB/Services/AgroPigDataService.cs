@@ -15,9 +15,8 @@ public class AgroPigDataService
 
     public AgroPigDataService(IConfiguration configuration, ILogger<AgroPigDataService> logger, IHttpContextAccessor httpContextAccessor)
     {
-        // Sin credenciales por defecto en código: configure ConnectionStrings:PostgreSQL con user-secrets o variable de entorno
-        _connectionString = configuration.GetConnectionString("PostgreSQL")
-            ?? throw new InvalidOperationException("Falta la cadena de conexión 'ConnectionStrings:PostgreSQL' (use user-secrets o variables de entorno).");
+        // Sin credenciales por defecto en código: configure ConnectionStrings:PostgreSQL o DATABASE_URL en user-secrets/variables de entorno
+        _connectionString = WEB.Security.PostgresConnectionResolver.Resolve(configuration);
         _logger = logger;
         _http = httpContextAccessor;
     }

@@ -3,10 +3,17 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using WEB.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var renderPort = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrWhiteSpace(renderPort) && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{renderPort}");
+}
 
 if (args.Contains("--reset-db"))
 {
@@ -15,8 +22,7 @@ if (args.Contains("--reset-db"))
         Console.Error.WriteLine("[RESET-DB] Operación bloqueada. Requiere entorno Development y el flag explícito '--confirm-reset'.");
         return;
     }
-    var connString = builder.Configuration.GetConnectionString("PostgreSQL")
-        ?? throw new InvalidOperationException("Falta 'ConnectionStrings:PostgreSQL' en user-secrets o variables de entorno.");
+    var connString = PostgresConnectionResolver.Resolve(builder.Configuration);
     Console.WriteLine("[RESET-DB] Conectando a PostgreSQL...");
     var sqlPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "DATABASE", "00_reset_limpio.sql"));
     var sql = await File.ReadAllTextAsync(sqlPath);
@@ -35,6 +41,12 @@ if (args.Contains("--reset-db"))
 builder.Services.AddRazorPages()
     .AddMvcOptions(o => o.Filters.Add<PoliticaPageFilter>());
 builder.Services.AddHttpContextAccessor();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 builder.Services.AddScoped<WEB.Services.UserRoleService>();
 builder.Services.AddScoped<WEB.Services.AgroPigDataService>();
 
@@ -140,6 +152,8 @@ if (jwtSettings.ClaveEfimera)
 // ---------------------------------------------------------------------------
 // Pipeline HTTP
 // ---------------------------------------------------------------------------
+app.UseForwardedHeaders();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
@@ -147,7 +161,10 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+if (app.Environment.IsDevelopment() || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_HTTPS_PORT")))
+{
+    app.UseHttpsRedirection();
+}
 
 // Cabeceras de seguridad básicas
 app.Use(async (ctx, next) =>
@@ -196,6 +213,10 @@ app.MapRazorPages()
 // ---------------------------------------------------------------------------
 // API REST
 // ---------------------------------------------------------------------------
+
+// Health check ligero para balanceadores (Render) sin despertar PostgreSQL innecesariamente
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "agropig-web", timestamp = DateTime.UtcNow }))
+   .AllowAnonymous();
 
 // Autenticación para la app móvil: devuelve un JWT de corta/media duración
 app.MapPost("/api/v1/auth/login", async (LoginApiRequest req, AuthService auth, JwtTokenService jwt, HttpContext ctx) =>
