@@ -1,0 +1,671 @@
+@page
+@model WEB.Pages.InventarioModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Inventario, Silos & Kardex";
+    const decimal TipoCambioNio = 36.80m;
+    var pctSiloBar = Math.Clamp((int)Math.Round((decimal)Model.Data.PorcentajeOcupacionSilos), 0, 100);
+    var haySilosCriticos = Model.Data.ItemsCriticosCount > 0;
+}
+
+<div class="p-4 sm:p-6 space-y-6">
+    <!-- 1. ENCABEZADO -->
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+        <div>
+            <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                <span class="material-symbols-outlined text-[16px]">warehouse</span>
+                <span>Abastecimiento &amp; Trazabilidad Kardex</span>
+            </div>
+            <h1 class="text-2xl font-bold font-headline text-on-surface tracking-tight">
+                Stock @(RoleService.EsAdmin ? "Valorizado" : "Físico"), Silos &amp; Kardex
+            </h1>
+            <p class="text-xs text-on-surface-variant mt-0.5">
+                Control de existencias de concentrado, granos, vacunas y movimientos auditados en PostgreSQL.
+            </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            @if (RoleService.EsAdmin)
+            {
+                <div class="inline-flex items-center rounded-xl border border-outline-variant bg-surface-container-low p-1 text-xs font-bold">
+                    <button type="button" onclick="cambiarMonedaInv('USD')" id="btn-inv-usd" class="px-3 py-1 rounded-lg bg-primary text-on-primary transition">$ USD</button>
+                    <button type="button" onclick="cambiarMonedaInv('NIO')" id="btn-inv-nio" class="px-3 py-1 rounded-lg text-on-surface-variant hover:text-on-surface transition">C$ NIO</button>
+                </div>
+            }
+            @if (RoleService.PuedeCrearInsumos)
+            {
+                <button type="button" onclick="abrirModalNuevoInsumo()"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">add_box</span>
+                    <span>Nuevo Insumo</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    <!-- ALERTAS -->
+    @if (!string.IsNullOrEmpty(Model.MensajeExito))
+    {
+        <div class="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center gap-2.5 text-xs font-medium shadow-2xs">
+            <span class="material-symbols-outlined text-emerald-700 text-[20px]">check_circle</span>
+            <span>@Model.MensajeExito</span>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Model.MensajeError))
+    {
+        <div class="p-3.5 rounded-xl bg-error-container/60 border border-error text-on-error-container flex items-center gap-2.5 text-xs font-medium shadow-2xs">
+            <span class="material-symbols-outlined text-error text-[20px]">error</span>
+            <span>@Model.MensajeError</span>
+        </div>
+    }
+
+    <!-- 2. KPI CARDS -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        @if (RoleService.EsAdmin)
+        {
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+                <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Valor Total Inventario</div>
+                <div class="text-2xl font-bold font-headline text-primary mt-1 tabular-nums inv-money"
+                     data-usd="$@Model.Data.ValorTotalInventario.ToString("N2")"
+                     data-nio="C$ @((Model.Data.ValorTotalInventario * TipoCambioNio).ToString("N2"))">
+                    $@Model.Data.ValorTotalInventario.ToString("N2")
+                </div>
+                <div class="text-[11px] text-outline mt-0.5">TC: C$ @TipoCambioNio.ToString("N2") / USD</div>
+            </div>
+        }
+        else
+        {
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+                <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Catálogo Activo</div>
+                <div class="text-2xl font-bold font-headline text-on-surface mt-1 tabular-nums">@Model.Data.Insumos.Count</div>
+                <div class="text-[11px] text-outline mt-0.5">Ítems en almacén y farmacia</div>
+            </div>
+        }
+
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Reserva en Silos</div>
+            <div class="text-2xl font-bold font-headline text-on-surface mt-1 tabular-nums">@Model.Data.ToneladasSilos.ToString("N2") Tn</div>
+            <div class="text-[11px] text-outline mt-0.5">@Model.Data.PorcentajeOcupacionSilos.ToString("N1")% ocupación estimada</div>
+        </div>
+
+        <div class="bg-surface-container-lowest border @(haySilosCriticos ? "border-error/60" : "border-outline-variant") rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Stock Bajo Mínimo</div>
+            <div class="text-2xl font-bold font-headline @(haySilosCriticos ? "text-error" : "text-emerald-700") mt-1 tabular-nums">@Model.Data.ItemsCriticosCount</div>
+            <div class="text-[11px] text-outline mt-0.5">Requieren reposición</div>
+        </div>
+
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Movimientos Kardex</div>
+            <div class="text-2xl font-bold font-headline text-on-surface mt-1 tabular-nums">@Model.Data.Movimientos.Count</div>
+            <div class="text-[11px] text-outline mt-0.5">Transacciones recientes</div>
+        </div>
+    </div>
+
+    <!-- 3. TABS -->
+    <div class="flex items-center gap-2 border-b border-outline-variant pb-1 overflow-x-auto">
+        <button type="button" id="btn-tab-stock" onclick="cambiarTabInv('stock')"
+                class="tab-inv-btn px-4 py-2 rounded-t-xl text-xs font-bold border-b-2 border-primary text-primary bg-primary-fixed/30 flex items-center gap-1.5 whitespace-nowrap">
+            <span class="material-symbols-outlined text-[16px]">inventory_2</span>
+            <span>Stock de Insumos &amp; Silos (@Model.Data.Insumos.Count)</span>
+        </button>
+        <button type="button" id="btn-tab-kardex" onclick="cambiarTabInv('kardex')"
+                class="tab-inv-btn px-4 py-2 rounded-t-xl text-xs font-bold border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 whitespace-nowrap">
+            <span class="material-symbols-outlined text-[16px]">swap_horiz</span>
+            <span>Movimientos Kardex &amp; Recepción (@Model.Data.Movimientos.Count)</span>
+        </button>
+    </div>
+
+    <!-- TAB 1: STOCK DE INSUMOS & SILOS -->
+    <div id="tab-stock" class="tab-inv-panel space-y-5">
+        <!-- Barra de Silos -->
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex-1 space-y-1.5">
+                <div class="flex items-center justify-between text-xs">
+                    <span class="font-bold text-on-surface flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px] text-primary">grain</span>
+                        <span>Capacidad Agregada de Silos de Concentrado</span>
+                    </span>
+                    <span class="font-mono font-bold text-primary">@Model.Data.ToneladasSilos.ToString("N2") Tn (@Model.Data.PorcentajeOcupacionSilos.ToString("N1")%)</span>
+                </div>
+                <div class="w-full h-2.5 rounded-full bg-surface-container overflow-hidden">
+                    <div class="h-full rounded-full @(Model.Data.PorcentajeOcupacionSilos < 25m ? "bg-error" : "bg-primary")" style="width: @pctSiloBar%"></div>
+                </div>
+            </div>
+            <input type="text" id="filtro-inventario" oninput="filtrarTablaInventario()"
+                   placeholder="Buscar SKU, insumo o silo..."
+                   class="h-9 px-3 rounded-xl border border-outline-variant text-xs w-full sm:w-64 focus:ring-1 focus:ring-primary" />
+        </div>
+
+        <!-- Tabla Maestra -->
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-2xs overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs tabular-nums">
+                    <thead>
+                        <tr class="bg-surface-container-low border-b border-outline-variant text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                            <th class="py-2.5 px-4">SKU / Insumo</th>
+                            <th class="py-2.5 px-3">Categoría</th>
+                            <th class="py-2.5 px-3">Ubicación / Silo</th>
+                            <th class="py-2.5 px-4 text-right">Stock Actual</th>
+                            <th class="py-2.5 px-4 text-right">Mínimo</th>
+                            @if (RoleService.EsAdmin)
+                            {
+                                <th class="py-2.5 px-3 text-right">Costo Unit.</th>
+                                <th class="py-2.5 px-4 text-right">Valorizado</th>
+                            }
+                            <th class="py-2.5 px-3 text-center">Estado</th>
+                            <th class="py-2.5 px-4 text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-container">
+                        @if (Model.Data.Insumos.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="9" class="py-10 text-center text-on-surface-variant">
+                                    No hay insumos registrados en el catálogo de PostgreSQL.
+                                </td>
+                            </tr>
+                        }
+                        @foreach (var item in Model.Data.Insumos)
+                        {
+                            var isAlert = item.EsCritico;
+                            <tr class="hover:bg-surface-container-low/50 transition-colors fila-inventario"
+                                data-search="@($"{item.Sku} {item.Nombre} {item.Categoria} {item.Ubicacion}".ToLowerInvariant())">
+                                <td class="py-3 px-4">
+                                    <div class="font-bold text-on-surface">@item.Nombre</div>
+                                    <div class="text-[10px] font-mono text-outline">@item.Sku</div>
+                                </td>
+                                <td class="py-3 px-3">
+                                    <span class="px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[11px] font-medium">
+                                        @item.Categoria
+                                    </span>
+                                </td>
+                                <td class="py-3 px-3 text-on-surface font-medium">@item.Ubicacion</td>
+                                <td class="py-3 px-4 text-right font-bold @(isAlert ? "text-error" : "text-on-surface")">
+                                    @item.StockActual.ToString("N0") @item.Unidad
+                                </td>
+                                <td class="py-3 px-4 text-right text-outline">
+                                    @item.StockMinimo.ToString("N0") @item.Unidad
+                                </td>
+                                @if (RoleService.EsAdmin)
+                                {
+                                    <td class="py-3 px-3 text-right font-mono inv-money"
+                                        data-usd="$@item.CostoUnitario.ToString("N2")"
+                                        data-nio="C$ @((item.CostoUnitario * TipoCambioNio).ToString("N2"))">
+                                        $@item.CostoUnitario.ToString("N2")
+                                    </td>
+                                    <td class="py-3 px-4 text-right font-bold font-mono inv-money"
+                                        data-usd="$@item.ValorTotal.ToString("N2")"
+                                        data-nio="C$ @((item.ValorTotal * TipoCambioNio).ToString("N2"))">
+                                        $@item.ValorTotal.ToString("N2")
+                                    </td>
+                                }
+                                <td class="py-3 px-3 text-center">
+                                    @if (isAlert)
+                                    {
+                                        <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-error-container text-on-error-container">Stock Bajo</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">Óptimo</span>
+                                    }
+                                </td>
+                                <td class="py-3 px-4 text-right whitespace-nowrap">
+                                    <div class="inline-flex items-center gap-1">
+                                        @if (RoleService.EsAdmin)
+                                        {
+                                            <button type="button"
+                                                    onclick="cargarInsumoParaEntrada('@item.Sku', '@item.Nombre', '@item.CostoUnitario')"
+                                                    class="px-2 py-1 rounded-lg bg-surface-container-high hover:bg-primary hover:text-on-primary text-[11px] font-semibold transition">
+                                                + Kardex
+                                            </button>
+                                        }
+                                        @if (RoleService.PuedeGestionarPresupuestos)
+                                        {
+                                            <a href="/Presupuestos" class="px-2 py-1 rounded-lg bg-secondary-container/50 text-secondary hover:bg-secondary hover:text-white text-[11px] font-semibold transition">
+                                                Costear
+                                            </a>
+                                        }
+                                        @if (RoleService.PuedeEditarInsumos)
+                                        {
+                                            <button type="button"
+                                                    onclick="abrirModalEditarInsumo('@item.Id', '@item.Sku', '@item.Nombre', '@item.Categoria', '@item.Unidad', '@item.StockMinimo', '@item.CostoUnitario', '@item.Ubicacion', '@item.StockActual')"
+                                                    class="p-1 rounded-lg text-primary hover:bg-primary-fixed transition" title="Editar">
+                                                <span class="material-symbols-outlined text-[16px]">edit</span>
+                                            </button>
+                                        }
+                                        @if (RoleService.PuedeEliminarInsumos)
+                                        {
+                                            <form method="post" asp-page-handler="EliminarInsumo" class="inline" onsubmit="return confirm('¿Desactivar este insumo del catálogo?');">
+                                                <input type="hidden" name="id" value="@item.Id" />
+                                                <button type="submit" class="p-1 rounded-lg text-error hover:bg-error-container/30 transition" title="Desactivar">
+                                                    <span class="material-symbols-outlined text-[16px]">delete</span>
+                                                </button>
+                                            </form>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: KARDEX & RECEPCIÓN -->
+    <div id="tab-kardex" class="tab-inv-panel hidden space-y-5">
+        @if (RoleService.EsAdmin)
+        {
+            <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-2xs overflow-hidden" id="form-kardex">
+                <div class="px-5 py-3.5 bg-surface-container-low border-b border-outline-variant flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-primary text-xl">post_add</span>
+                        <h2 class="text-sm font-bold font-headline text-on-surface">Registrar Entrada Valorizada a Kardex</h2>
+                    </div>
+                    <a href="/Compras" class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                        <span>¿Factura con descuento por volumen? Ir a Compras</span>
+                        <span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+                    </a>
+                </div>
+                <form method="post" asp-page-handler="RegistrarEntrada" class="p-5">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                        <div class="lg:col-span-2">
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Nombre del Insumo *</label>
+                            <input name="nombre" id="input-nombre-insumo" required type="text" placeholder="Ej: Concentrado Engorde 18%"
+                                   class="w-full h-9 px-3 border border-outline-variant rounded-xl text-xs text-on-surface" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Código SKU *</label>
+                            <input name="sku" id="input-sku" required type="text" placeholder="ALM-001"
+                                   class="w-full h-9 px-3 border border-outline-variant rounded-xl text-xs font-mono text-on-surface" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Categoría</label>
+                            <select name="categoria" class="w-full h-9 px-2.5 border border-outline-variant rounded-xl text-xs text-on-surface">
+                                @if (Model.Data.CategoriasDisponibles.Count > 0)
+                                {
+                                    @foreach (var cat in Model.Data.CategoriasDisponibles)
+                                    {
+                                        <option value="@cat.Nombre">@cat.Nombre</option>
+                                    }
+                                }
+                                else
+                                {
+                                    <option selected>Alimento Balanceado</option>
+                                    <option>Materias Primas / Granos</option>
+                                    <option>Medicamentos &amp; Vacunas</option>
+                                    <option>Desinfectantes &amp; Bioseguridad</option>
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Unidad</label>
+                            <select name="unidad" class="w-full h-9 px-2.5 border border-outline-variant rounded-xl text-xs text-on-surface">
+                                <option selected value="Kg">Kg (Kilogramos)</option>
+                                <option value="Tn">Tn (Toneladas)</option>
+                                <option value="Bultos (40 kg)">Bultos (40 kg)</option>
+                                <option value="Sacos (25 kg)">Sacos (25 kg)</option>
+                                <option value="ml">ml</option>
+                                <option value="Litros">Litros</option>
+                                <option value="Frascos">Frascos</option>
+                                <option value="Dosis">Dosis</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Cantidad *</label>
+                            <input name="cantidad" id="input-cantidad" required type="number" min="0.1" step="0.1" value="500"
+                                   oninput="actualizarValuacionCalculada()"
+                                   class="w-full h-9 px-3 border border-outline-variant rounded-xl text-xs font-mono text-on-surface" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Costo Unitario ($ USD) *</label>
+                            <input name="costoUnitario" id="input-costo" required type="number" min="0.01" step="0.01" value="0.45"
+                                   oninput="actualizarValuacionCalculada()"
+                                   class="w-full h-9 px-3 border border-outline-variant rounded-xl text-xs font-mono text-on-surface" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface mb-1">Depósito / Silo Destino</label>
+                            <select name="destino" class="w-full h-9 px-2.5 border border-outline-variant rounded-xl text-xs text-on-surface">
+                                @if (Model.Data.SilosDisponibles.Count > 0)
+                                {
+                                    <option value="Bodega Central">Bodega Central</option>
+                                    @foreach (var silo in Model.Data.SilosDisponibles)
+                                    {
+                                        <option value="@silo.Nombre">@silo.Nombre</option>
+                                    }
+                                }
+                                else
+                                {
+                                    <option value="Bodega Central">Bodega Central</option>
+                                    <option value="Silo Nodriza A-1">Silo Nodriza A-1</option>
+                                    <option value="Silo Gestacion">Silo Gestacion</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-outline-variant flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div class="text-xs text-on-surface-variant">
+                            Valoración calculada: <strong class="font-mono text-on-surface" id="label-valuacion">+$225.00 USD</strong>
+                            <span class="text-outline font-mono ml-1" id="label-valuacion-nio">(C$ 8,280.00)</span>
+                        </div>
+                        <button type="submit" class="px-5 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[16px]">check_circle</span>
+                            <span>Guardar en Kardex</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+        }
+        else
+        {
+            <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant text-xs text-on-surface-variant flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[18px]">info</span>
+                <span>Los consumos físicos de alimento y medicamentos se descuentan al sincronizar la App Móvil; el ingreso valorizado de facturas corresponde al perfil Administrador.</span>
+            </div>
+        }
+
+        <!-- Auditoría de Movimientos -->
+        <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-2xs overflow-hidden">
+            <div class="p-4 border-b border-outline-variant flex items-center justify-between">
+                <h3 class="text-sm font-bold font-headline text-on-surface flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary text-[18px]">history</span>
+                    <span>Auditoría Reciente de Kardex</span>
+                </h3>
+                <span class="text-xs font-mono text-outline">@Model.Data.Movimientos.Count registro(s)</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs tabular-nums">
+                    <thead>
+                        <tr class="bg-surface-container-low border-b border-outline-variant text-[11px] font-bold text-on-surface-variant uppercase">
+                            <th class="py-2.5 px-4">Fecha</th>
+                            <th class="py-2.5 px-3">Tipo</th>
+                            <th class="py-2.5 px-4">Insumo</th>
+                            <th class="py-2.5 px-3">Documento / Lote</th>
+                            <th class="py-2.5 px-4 text-right">Cantidad</th>
+                            @if (RoleService.EsAdmin)
+                            {
+                                <th class="py-2.5 px-3 text-right">Costo Unit.</th>
+                                <th class="py-2.5 px-4 text-right">Total</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-container">
+                        @if (Model.Data.Movimientos.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="7" class="py-8 text-center text-on-surface-variant">Sin movimientos registrados.</td>
+                            </tr>
+                        }
+                        @foreach (var mov in Model.Data.Movimientos)
+                        {
+                            var isEntrada = mov.Tipo.Contains("entrada", StringComparison.OrdinalIgnoreCase);
+                            <tr class="hover:bg-surface-container-low/50">
+                                <td class="py-3 px-4 font-mono text-outline">@mov.Fecha.ToString("dd/MM/yyyy HH:mm")</td>
+                                <td class="py-3 px-3">
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase @(isEntrada ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900")">
+                                        @mov.Tipo
+                                    </span>
+                                </td>
+                                <td class="py-3 px-4 font-semibold text-on-surface">@mov.InsumoNombre</td>
+                                <td class="py-3 px-3 text-on-surface-variant">
+                                    <span>@(string.IsNullOrWhiteSpace(mov.Documento) ? "—" : mov.Documento)</span>
+                                    @if (!string.IsNullOrWhiteSpace(mov.LoteCodigo))
+                                    {
+                                        <span class="ml-1 font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-container">@mov.LoteCodigo</span>
+                                    }
+                                </td>
+                                <td class="py-3 px-4 text-right font-mono font-bold @(isEntrada ? "text-emerald-700" : "text-on-surface")">
+                                    @(isEntrada ? "+" : "-")@mov.Cantidad.ToString("N2")
+                                </td>
+                                @if (RoleService.EsAdmin)
+                                {
+                                    <td class="py-3 px-3 text-right font-mono inv-money"
+                                        data-usd="$@mov.CostoUnitario.ToString("N2")"
+                                        data-nio="C$ @((mov.CostoUnitario * TipoCambioNio).ToString("N2"))">
+                                        $@mov.CostoUnitario.ToString("N2")
+                                    </td>
+                                    <td class="py-3 px-4 text-right font-bold font-mono inv-money"
+                                        data-usd="$@mov.ValorTotal.ToString("N2")"
+                                        data-nio="C$ @((mov.ValorTotal * TipoCambioNio).ToString("N2"))">
+                                        $@mov.ValorTotal.ToString("N2")
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- MODAL: NUEVO INSUMO -->
+<div class="fixed inset-0 z-50 bg-[#1c2a1e]/40 backdrop-blur-[2px] hidden items-center justify-center p-4" id="modal-nuevo-insumo">
+    <div class="w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant overflow-hidden flex flex-col">
+        <div class="p-5 border-b border-outline-variant bg-surface-container-low flex items-center justify-between">
+            <h3 class="font-headline font-bold text-base text-on-surface">Crear Nuevo Insumo / Alimento</h3>
+            <button type="button" onclick="cerrarModalNuevoInsumo()" class="text-on-surface-variant hover:text-on-surface">
+                <span class="material-symbols-outlined text-[20px]">close</span>
+            </button>
+        </div>
+        <form method="post" asp-page-handler="CrearInsumo" class="p-5 space-y-3.5">
+            <div class="grid grid-cols-2 gap-3">
+                <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Nombre *</label>
+                    <input type="text" name="nombre" required placeholder="Ej: Maíz Amarillo Molido" class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">SKU *</label>
+                    <input type="text" name="sku" required placeholder="ALM-MZ-01" class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Categoría</label>
+                    <select name="categoria" class="w-full h-9 px-2 rounded-lg border border-outline-variant text-xs">
+                        @if (Model.Data.CategoriasDisponibles.Count > 0)
+                        {
+                            @foreach (var cat in Model.Data.CategoriasDisponibles)
+                            {
+                                <option value="@cat.Nombre">@cat.Nombre</option>
+                            }
+                        }
+                        else
+                        {
+                            <option selected value="Alimento Balanceado">Alimento Balanceado</option>
+                            <option value="Materias Primas / Granos">Materias Primas / Granos</option>
+                            <option value="Medicamentos &amp; Vacunas">Medicamentos &amp; Vacunas</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Unidad</label>
+                    <select name="unidad" class="w-full h-9 px-2 rounded-lg border border-outline-variant text-xs">
+                        <option selected value="Kg">Kg</option>
+                        <option value="Tn">Tn</option>
+                        <option value="Bultos (40 kg)">Bultos (40 kg)</option>
+                        <option value="Sacos (25 kg)">Sacos (25 kg)</option>
+                        <option value="ml">ml</option>
+                        <option value="Litros">Litros</option>
+                        <option value="Frascos">Frascos</option>
+                        <option value="Dosis">Dosis</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Costo Unitario ($ USD) *</label>
+                    <input type="number" step="0.01" min="0" name="costoUnitario" required value="0.30" class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Stock Mínimo *</label>
+                    <input type="number" step="1" min="0" name="stockMinimo" required value="500" class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Stock Inicial</label>
+                    <input type="number" step="1" min="0" name="stockInicial" value="0" class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Silo / Bodega</label>
+                    <select name="silo" class="w-full h-9 px-2 rounded-lg border border-outline-variant text-xs">
+                        <option value="Sin Silo">Bodega Central</option>
+                        @foreach (var silo in Model.Data.SilosDisponibles)
+                        {
+                            <option value="@silo.Nombre">@silo.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Descripción / Ficha</label>
+                    <textarea name="descripcion" rows="2" class="w-full p-2.5 rounded-lg border border-outline-variant text-xs"></textarea>
+                </div>
+            </div>
+            <div class="pt-3 border-t border-outline-variant flex justify-end gap-2">
+                <button type="button" onclick="cerrarModalNuevoInsumo()" class="px-4 py-2 rounded-xl border border-outline-variant text-xs font-semibold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold">Guardar Insumo</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- MODAL: EDITAR INSUMO -->
+<div class="fixed inset-0 z-50 bg-[#1c2a1e]/40 backdrop-blur-[2px] hidden items-center justify-center p-4" id="modal-editar-insumo">
+    <div class="w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant overflow-hidden flex flex-col">
+        <div class="p-5 border-b border-outline-variant bg-surface-container-low flex items-center justify-between">
+            <div>
+                <h3 class="font-headline font-bold text-base text-on-surface">Editar Insumo</h3>
+                <p class="text-[11px] text-on-surface-variant" id="label-edit-sku">SKU: </p>
+            </div>
+            <button type="button" onclick="cerrarModalEditarInsumo()" class="text-on-surface-variant hover:text-on-surface">
+                <span class="material-symbols-outlined text-[20px]">close</span>
+            </button>
+        </div>
+        <form method="post" asp-page-handler="ActualizarInsumo" class="p-5 space-y-3.5">
+            <input type="hidden" name="id" id="edit-id" />
+            <input type="hidden" name="categoria" id="edit-categoria" />
+            <div class="grid grid-cols-2 gap-3">
+                <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Nombre *</label>
+                    <input type="text" name="nombre" id="edit-nombre" required class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-semibold" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Unidad</label>
+                    <input type="text" name="unidad" id="edit-unidad" required class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Costo Unitario ($ USD) *</label>
+                    <input type="number" step="0.0001" min="0" name="costoUnitario" id="edit-costo" required class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Stock Actual</label>
+                    <input type="number" step="0.01" min="0" name="stockActual" id="edit-stock-actual" required class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Stock Mínimo *</label>
+                    <input type="number" step="0.01" min="0" name="stockMinimo" id="edit-stock-minimo" required class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-mono" />
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Ubicación / Silo</label>
+                    <select name="silo" id="edit-silo" class="w-full h-9 px-2 rounded-lg border border-outline-variant text-xs">
+                        <option value="Bodega Central">Bodega Central</option>
+                        @foreach (var silo in Model.Data.SilosDisponibles)
+                        {
+                            <option value="@silo.Nombre">@silo.Nombre</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="pt-3 border-t border-outline-variant flex justify-end gap-2">
+                <button type="button" onclick="cerrarModalEditarInsumo()" class="px-4 py-2 rounded-xl border border-outline-variant text-xs font-semibold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold">Actualizar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const TC_INV = 36.80;
+
+        function cambiarMonedaInv(moneda) {
+            document.querySelectorAll('.inv-money').forEach(el => {
+                el.innerText = moneda === 'NIO' ? el.dataset.nio : el.dataset.usd;
+            });
+            const u = document.getElementById('btn-inv-usd');
+            const n = document.getElementById('btn-inv-nio');
+            if (u && n) {
+                u.className = moneda === 'USD' ? 'px-3 py-1 rounded-lg bg-primary text-on-primary transition' : 'px-3 py-1 rounded-lg text-on-surface-variant hover:text-on-surface transition';
+                n.className = moneda === 'NIO' ? 'px-3 py-1 rounded-lg bg-primary text-on-primary transition' : 'px-3 py-1 rounded-lg text-on-surface-variant hover:text-on-surface transition';
+            }
+        }
+
+        function cambiarTabInv(tab) {
+            document.querySelectorAll('.tab-inv-panel').forEach(p => p.classList.add('hidden'));
+            const panel = document.getElementById('tab-' + tab);
+            if (panel) panel.classList.remove('hidden');
+            document.querySelectorAll('.tab-inv-btn').forEach(b => {
+                b.classList.remove('border-primary', 'text-primary', 'bg-primary-fixed/30');
+                b.classList.add('border-transparent', 'text-on-surface-variant');
+            });
+            const btn = document.getElementById('btn-tab-' + tab);
+            if (btn) {
+                btn.classList.add('border-primary', 'text-primary', 'bg-primary-fixed/30');
+                btn.classList.remove('border-transparent', 'text-on-surface-variant');
+            }
+        }
+
+        function filtrarTablaInventario() {
+            const q = (document.getElementById('filtro-inventario')?.value || '').trim().toLowerCase();
+            document.querySelectorAll('.fila-inventario').forEach(tr => {
+                tr.style.display = (tr.dataset.search || '').includes(q) ? '' : 'none';
+            });
+        }
+
+        function actualizarValuacionCalculada() {
+            const cant = parseFloat(document.getElementById('input-cantidad')?.value) || 0;
+            const costo = parseFloat(document.getElementById('input-costo')?.value) || 0;
+            const totalUsd = cant * costo;
+            const totalNio = totalUsd * TC_INV;
+            const lbl = document.getElementById('label-valuacion');
+            const lblNio = document.getElementById('label-valuacion-nio');
+            if (lbl) lbl.innerText = '+$' + totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
+            if (lblNio) lblNio.innerText = '(C$ ' + totalNio.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ')';
+        }
+
+        function cargarInsumoParaEntrada(sku, nombre, costo) {
+            cambiarTabInv('kardex');
+            const s = document.getElementById('input-sku');
+            const n = document.getElementById('input-nombre-insumo');
+            const c = document.getElementById('input-costo');
+            if (s) s.value = sku;
+            if (n) n.value = nombre;
+            if (c && costo) c.value = costo;
+            actualizarValuacionCalculada();
+            document.getElementById('form-kardex')?.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function abrirModalNuevoInsumo() {
+            const m = document.getElementById('modal-nuevo-insumo');
+            if (m) { m.classList.remove('hidden'); m.classList.add('flex'); }
+        }
+        function cerrarModalNuevoInsumo() {
+            const m = document.getElementById('modal-nuevo-insumo');
+            if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+        }
+        function abrirModalEditarInsumo(id, sku, nombre, cat, unidad, minStock, costo, ubicacion, stockActual) {
+            document.getElementById('edit-id').value = id;
+            document.getElementById('edit-categoria').value = cat;
+            document.getElementById('label-edit-sku').innerText = 'SKU: ' + sku;
+            document.getElementById('edit-nombre').value = nombre;
+            document.getElementById('edit-unidad').value = unidad;
+            document.getElementById('edit-costo').value = costo;
+            document.getElementById('edit-stock-actual').value = stockActual;
+            document.getElementById('edit-stock-minimo').value = minStock;
+            const selSilo = document.getElementById('edit-silo');
+            if (selSilo && ubicacion) selSilo.value = ubicacion;
+            const m = document.getElementById('modal-editar-insumo');
+            if (m) { m.classList.remove('hidden'); m.classList.add('flex'); }
+        }
+        function cerrarModalEditarInsumo() {
+            const m = document.getElementById('modal-editar-insumo');
+            if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+        }
+    </script>
+}

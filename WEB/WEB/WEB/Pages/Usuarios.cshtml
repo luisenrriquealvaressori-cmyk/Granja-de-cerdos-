@@ -1,0 +1,275 @@
+@page
+@model WEB.Pages.UsuariosModel
+@{
+    ViewData["Title"] = "Gestión de Usuarios & Roles";
+}
+
+<div class="p-4 sm:p-6 space-y-6">
+    <!-- 1. ENCABEZADO -->
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+        <div>
+            <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">
+                <span class="material-symbols-outlined text-[16px]">admin_panel_settings</span>
+                <span>Seguridad &amp; Control de Accesos</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2.5">
+                <h1 class="text-2xl font-bold font-headline text-on-surface tracking-tight">
+                    Usuarios y Roles del Sistema
+                </h1>
+                <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold">
+                    Solo Administrador
+                </span>
+            </div>
+            <p class="text-xs text-on-surface-variant mt-1 max-w-2xl">
+                Administración de cuentas de colaboradores con contraseñas encriptadas (PBKDF2/SHA-256). Cada cuenta accede simultáneamente a la App Móvil (campo) y Consola Web según sus permisos.
+            </p>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-container-low border border-outline-variant text-xs font-semibold text-on-surface">
+                <span class="material-symbols-outlined text-[16px] text-primary">verified_user</span>
+                <span>@Model.Data.TotalActivos de @Model.Data.TotalUsuarios activos</span>
+            </span>
+        </div>
+    </div>
+
+    <!-- ALERTAS -->
+    @if (!string.IsNullOrEmpty(Model.MensajeExito))
+    {
+        <div class="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center gap-2.5 text-xs font-medium shadow-2xs">
+            <span class="material-symbols-outlined text-emerald-700 text-[20px]">check_circle</span>
+            <span>@Model.MensajeExito</span>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Model.MensajeError))
+    {
+        <div class="p-3.5 rounded-xl bg-error-container/60 border border-error text-on-error-container flex items-center gap-2.5 text-xs font-medium shadow-2xs">
+            <span class="material-symbols-outlined text-error text-[20px]">error</span>
+            <span>@Model.MensajeError</span>
+        </div>
+    }
+
+    <!-- 2. KPI DE DISTRIBUCIÓN DE ROLES -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Total Colaboradores</div>
+            <div class="text-2xl font-bold font-headline text-on-surface mt-1 tabular-nums">@Model.Data.TotalUsuarios</div>
+            <div class="text-[11px] text-emerald-700 font-semibold mt-0.5">@Model.Data.TotalActivos habilitados</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Administradores</div>
+            <div class="text-2xl font-bold font-headline text-emerald-800 mt-1 tabular-nums">@Model.Data.TotalAdmins</div>
+            <div class="text-[11px] text-outline mt-0.5">Costes, Compras, Lotes &amp; Accesos</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Veterinarios (MVZ)</div>
+            <div class="text-2xl font-bold font-headline text-teal-800 mt-1 tabular-nums">@Model.Data.TotalVeterinarios</div>
+            <div class="text-[11px] text-outline mt-0.5">Sanidad, Reproducción &amp; Bajas</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Operarios de Campo</div>
+            <div class="text-2xl font-bold font-headline text-amber-800 mt-1 tabular-nums">@Model.Data.TotalOperarios</div>
+            <div class="text-[11px] text-outline mt-0.5">Alimento, Labores, Pesajes &amp; Tareas</div>
+        </div>
+    </div>
+
+    <!-- 3. MATRIZ OPERATIVA POR ROL: APP MÓVIL vs CONSOLA WEB -->
+    <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 sm:p-5 shadow-2xs">
+        <div class="flex items-center gap-2 mb-3">
+            <span class="material-symbols-outlined text-primary text-[18px]">shield</span>
+            <h2 class="text-sm font-bold font-headline text-on-surface">Matriz Operativa por Rol (Separación Campo vs Finanzas)</h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div class="p-3.5 rounded-xl border border-amber-300/70 bg-amber-50/40 space-y-1.5">
+                <div class="font-bold text-amber-900 flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-[16px]">agriculture</span>
+                    <span>Operario de Campo</span>
+                </div>
+                <p class="text-[11px] text-on-surface-variant">
+                    <strong>App Móvil:</strong> Ración de alimento, labores de limpieza/tolvas/pesaje, bajas y checklist diario.<br />
+                    <strong>Consola Web:</strong> Inventario físico, calendario de labores y lógica zootécnica <em>(sin precios ni costes USD/C$)</em>.
+                </p>
+            </div>
+            <div class="p-3.5 rounded-xl border border-teal-300/70 bg-teal-50/40 space-y-1.5">
+                <div class="font-bold text-teal-900 flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-[16px]">stethoscope</span>
+                    <span>Veterinario (MVZ)</span>
+                </div>
+                <p class="text-[11px] text-on-surface-variant">
+                    <strong>App Móvil:</strong> Eventos IA / Partos / Destetes, tratamientos/vacunas, labores clínicas y bajas.<br />
+                    <strong>Consola Web:</strong> Ciclo 114d-21d-7d, animales, lotes y programación de tareas <em>(sin finanzas)</em>.
+                </p>
+            </div>
+            <div class="p-3.5 rounded-xl border border-emerald-300/70 bg-emerald-50/40 space-y-1.5">
+                <div class="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-[16px]">admin_panel_settings</span>
+                    <span>Administrador General</span>
+                </div>
+                <p class="text-[11px] text-on-surface-variant">
+                    <strong>App Móvil:</strong> Supervisión de labores, inventario rápido y registro operativo completo.<br />
+                    <strong>Consola Web:</strong> Costes bimonetarios ($ USD / C$ 36.80), presupuestos por centro de costo, compras, Kardex valorizado y usuarios.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. DIRECTORIO Y FORMULARIO DE ALTA -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <!-- Directorio (8 cols) -->
+        <div class="lg:col-span-8 bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-2xs overflow-hidden">
+            <div class="px-5 py-4 border-b border-outline-variant flex items-center justify-between">
+                <div>
+                    <h2 class="text-sm font-bold font-headline text-on-surface">Colaboradores Registrados en PostgreSQL</h2>
+                    <p class="text-[11px] text-on-surface-variant">Cada usuario define su propia contraseña segura al primer ingreso</p>
+                </div>
+                <span class="text-xs font-mono text-outline">@Model.Data.Usuarios.Count cuenta(s)</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead>
+                        <tr class="bg-surface-container-low border-b border-outline-variant text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                            <th class="py-2.5 px-4">Colaborador</th>
+                            <th class="py-2.5 px-3">Usuario</th>
+                            <th class="py-2.5 px-3">Rol</th>
+                            <th class="py-2.5 px-3">Contacto / Matrícula</th>
+                            <th class="py-2.5 px-3 text-center">Estado</th>
+                            <th class="py-2.5 px-4 text-right">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-surface-container">
+                        @foreach (var u in Model.Data.Usuarios)
+                        {
+                            var esAdmin = u.Rol.Contains("admin", StringComparison.OrdinalIgnoreCase);
+                            var esVet = u.Rol.Contains("vet", StringComparison.OrdinalIgnoreCase);
+                            var avatarCls = esAdmin ? "bg-emerald-100 text-emerald-800" : esVet ? "bg-teal-100 text-teal-800" : "bg-amber-100 text-amber-800";
+                            var inicial = string.IsNullOrWhiteSpace(u.Nombre) ? "U" : u.Nombre.Trim()[..1].ToUpperInvariant();
+                            <tr class="hover:bg-surface-container-low/50">
+                                <td class="py-3 px-4">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-8 h-8 rounded-full @avatarCls flex items-center justify-center font-bold text-xs shrink-0">
+                                            @inicial
+                                        </div>
+                                        <div>
+                                            <div class="font-bold text-on-surface">@u.Nombre</div>
+                                            <div class="text-[10px] text-outline">
+                                                @(u.UltimoLogin.HasValue ? $"Último acceso: {u.UltimoLogin.Value:dd/MM/yy HH:mm}" : "Sin acceso previo")
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="py-3 px-3 font-mono font-bold text-primary">@u.NombreUsuario</td>
+                                <td class="py-3 px-3">
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold @u.RolBadgeClass">
+                                        <span class="material-symbols-outlined text-[13px]">@u.IconoRol</span>
+                                        <span>@u.RolNombreLegible</span>
+                                    </span>
+                                </td>
+                                <td class="py-3 px-3 text-[11px] text-on-surface-variant">
+                                    @if (!string.IsNullOrWhiteSpace(u.MatriculaProfesional))
+                                    {
+                                        <div class="font-mono font-semibold text-teal-800">@u.MatriculaProfesional</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(u.Telefono))
+                                    {
+                                        <div>@u.Telefono</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(u.Email))
+                                    {
+                                        <div class="text-[10px] text-outline">@u.Email</div>
+                                    }
+                                    @if (string.IsNullOrWhiteSpace(u.MatriculaProfesional) && string.IsNullOrWhiteSpace(u.Telefono) && string.IsNullOrWhiteSpace(u.Email))
+                                    {
+                                        <span class="text-outline">—</span>
+                                    }
+                                </td>
+                                <td class="py-3 px-3 text-center">
+                                    @if (u.Activo)
+                                    {
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Activo</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-error-container text-on-error-container">Bloqueado</span>
+                                    }
+                                </td>
+                                <td class="py-3 px-4 text-right">
+                                    <form method="post" asp-page-handler="ToggleActivo" class="inline"
+                                          onsubmit="return confirm('¿Cambiar estado de acceso para @u.Nombre?');">
+                                        <input type="hidden" name="usuarioId" value="@u.Id" />
+                                        <button type="submit"
+                                                class="px-2.5 py-1 rounded-lg border border-outline-variant text-[11px] font-bold @(u.Activo ? "text-error hover:bg-error-container/30" : "text-emerald-700 hover:bg-emerald-50") transition">
+                                            @(u.Activo ? "Desactivar" : "Activar")
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Formulario Nuevo Usuario (4 cols) -->
+        <div class="lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-2xs">
+            <div class="flex items-center gap-2 pb-3 border-b border-outline-variant mb-4">
+                <span class="material-symbols-outlined text-primary text-[20px]">person_add</span>
+                <h2 class="text-sm font-bold font-headline text-on-surface">Crear Nueva Cuenta</h2>
+            </div>
+
+            <form method="post" asp-page-handler="CrearUsuario" class="flex flex-col gap-3 text-xs">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Nombre de Usuario (Login) *</label>
+                    <input type="text" name="NombreUsuario" required placeholder="ej: mariar, pedroc"
+                           class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-mono font-semibold" />
+                </div>
+
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Nombre Completo *</label>
+                    <input type="text" name="Nombre" required placeholder="Ej: María Rodríguez"
+                           class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-semibold" />
+                </div>
+
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Rol del Sistema *</label>
+                    <select name="Rol" required class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-semibold">
+                        <option value="operario_galpon" selected>Operario de Campo (Manejo, Silos, Labores)</option>
+                        <option value="director_veterinario">Director Veterinario / MVZ (Sanidad, Partos, IA)</option>
+                        <option value="administrador_financiero">Administrador (Finanzas, Presupuestos, Usuarios)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Contraseña Inicial Temporal *</label>
+                    <input type="password" name="Password" required minlength="8" autocomplete="new-password"
+                           placeholder="Mínimo 8 caracteres seguros"
+                           class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-mono" />
+                    <span class="text-[10px] text-outline mt-1 block">Se exigirá cambio obligatorio al primer inicio de sesión.</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block font-bold text-on-surface mb-1">Matrícula (MVZ)</label>
+                        <input type="text" name="MatriculaProfesional" placeholder="Opcional"
+                               class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface" />
+                    </div>
+                    <div>
+                        <label class="block font-bold text-on-surface mb-1">Teléfono</label>
+                        <input type="text" name="Telefono" placeholder="+505 ..."
+                               class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Correo Electrónico (Opcional)</label>
+                    <input type="email" name="Email" placeholder="usuario&#64;granjasanjose.com"
+                           class="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface" />
+                </div>
+
+                <button type="submit" class="mt-2 w-full py-2.5 rounded-xl bg-primary text-on-primary font-bold hover:bg-secondary transition flex items-center justify-center gap-1.5">
+                    <span class="material-symbols-outlined text-[18px]">save</span>
+                    <span>Registrar Colaborador</span>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>

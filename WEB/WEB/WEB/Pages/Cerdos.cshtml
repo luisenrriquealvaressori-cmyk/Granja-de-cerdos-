@@ -1,0 +1,1175 @@
+@page
+@model WEB.Pages.CerdosModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Padrón de Cerdos, Jaulas & Planes Zootécnicos";
+    var user = RoleService.CurrentUser;
+    var jaulasJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.Jaulas);
+    var cerdosJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.Cerdos);
+}
+
+<div class="px-6 py-5 flex flex-col gap-6">
+
+    <!-- Mensajes de Notificación TempData -->
+    @if (!string.IsNullOrEmpty(Model.MensajeExito))
+    {
+        <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center justify-between shadow-xs animate-fade-in">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-emerald-600 text-2xl">verified</span>
+                <div>
+                    <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">Operación Exitosa</div>
+                    <div class="text-sm font-medium">@Model.MensajeExito</div>
+                </div>
+            </div>
+            <button type="button" class="text-emerald-700 hover:text-emerald-900" onclick="this.parentElement.remove()">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Model.MensajeError))
+    {
+        <div class="p-4 rounded-xl bg-red-50 border border-red-300 text-red-900 flex items-center justify-between shadow-xs animate-fade-in">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-red-600 text-2xl">error</span>
+                <div>
+                    <div class="text-xs font-bold uppercase tracking-wider text-red-700">Aviso / Error</div>
+                    <div class="text-sm font-medium">@Model.MensajeError</div>
+                </div>
+            </div>
+            <button type="button" class="text-red-700 hover:text-red-900" onclick="this.parentElement.remove()">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+    }
+
+    <!-- 1. HEADER & ACCIONES PRINCIPALES -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-28px">grid_view</span>
+                <h1 class="text-2xl font-headline font-bold text-on-surface tracking-tight">Padrón de Cerdos, Jaulas &amp; Nutrición</h1>
+            </div>
+            <p class="text-xs text-on-surface-variant mt-1">
+                Control individual de piara, monitor de capacidad de jaulas/corrales por etapa y cálculo automatizado de días de vida, plan vacunal y racionamiento diario.
+            </p>
+        </div>
+
+        <div class="flex items-center gap-3 flex-wrap">
+            <button type="button" onclick="abrirModalCalculadora()" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface text-xs font-bold hover:bg-surface-container-low transition-all shadow-xs">
+                <span class="material-symbols-outlined text-18px text-primary">calculate</span>
+                <span>Calculadora Zootécnica</span>
+            </button>
+            <button type="button" onclick="abrirModalCerdo()" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:bg-secondary active:scale-98 transition-all shadow-sm">
+                <span class="material-symbols-outlined text-18px">add</span>
+                <span>Registrar Cerdo</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. RESUMEN DE CAPACIDAD & PADRÓN POR ETAPA (KPIs) -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <!-- KPI Total Cerdos -->
+        <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant">
+                <span class="text-11px font-bold uppercase tracking-wider">Total Piara</span>
+                <span class="material-symbols-outlined text-18px text-primary">pets</span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-1.5">
+                <span class="text-2xl font-headline font-bold text-on-surface tabular-nums">@Model.Data.TotalCerdos</span>
+                <span class="text-11px text-on-surface-variant">cabezas</span>
+            </div>
+            <div class="text-10px text-outline mt-1">Cerdos identificados</div>
+        </div>
+
+        <!-- KPI Ocupación Jaulas -->
+        <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant">
+                <span class="text-11px font-bold uppercase tracking-wider">Ocupación Jaulas</span>
+                <span class="material-symbols-outlined text-18px text-teal-700">fence</span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-1.5">
+                <span class="text-2xl font-headline font-bold text-on-surface tabular-nums">@Model.Data.PctOcupacionGlobal%</span>
+                <span class="text-11px text-on-surface-variant">(@Model.Data.TotalOcupacionJaulas/@Model.Data.TotalCapacidadJaulas)</span>
+            </div>
+            <div class="w-full bg-surface-container rounded-full h-1.5 mt-1.5 overflow-hidden">
+                <div class="bg-teal-600 h-1.5 rounded-full" style="width: @Math.Min(100, Model.Data.PctOcupacionGlobal)%"></div>
+            </div>
+        </div>
+
+        <!-- KPI Maternidad -->
+        <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant">
+                <span class="text-11px font-bold uppercase tracking-wider">Maternidad</span>
+                <span class="material-symbols-outlined text-18px text-pink-700">child_care</span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-1.5">
+                <span class="text-2xl font-headline font-bold text-on-surface tabular-nums">@Model.Data.CerdosLactancia</span>
+                <span class="text-11px text-on-surface-variant">lactantes</span>
+            </div>
+            <div class="text-10px text-pink-700 font-semibold mt-1">0 - 28 días | 5 tomas/d</div>
+        </div>
+
+        <!-- KPI Precebo -->
+        <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant">
+                <span class="text-11px font-bold uppercase tracking-wider">Precebo</span>
+                <span class="material-symbols-outlined text-18px text-amber-700">spa</span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-1.5">
+                <span class="text-2xl font-headline font-bold text-on-surface tabular-nums">@Model.Data.CerdosPrecebo</span>
+                <span class="text-11px text-on-surface-variant">lechones</span>
+            </div>
+            <div class="text-10px text-amber-800 font-semibold mt-1">29 - 70 días | 4 tomas/d</div>
+        </div>
+
+        <!-- KPI Crecimiento & Engorde -->
+        <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant">
+                <span class="text-11px font-bold uppercase tracking-wider">Crec. &amp; Engorde</span>
+                <span class="material-symbols-outlined text-18px text-indigo-700">trending_up</span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-1.5">
+                <span class="text-2xl font-headline font-bold text-on-surface tabular-nums">@(Model.Data.CerdosCrecimiento + Model.Data.CerdosEngorde)</span>
+                <span class="text-11px text-on-surface-variant">ceba</span>
+            </div>
+            <div class="text-10px text-indigo-700 font-semibold mt-1">71 - 165+ d | 3 y 2 tomas/d</div>
+        </div>
+
+        <!-- KPI Sanidad Urgente -->
+        <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant">
+                <span class="text-11px font-bold uppercase tracking-wider">Vacunas Hoy</span>
+                <span class="material-symbols-outlined text-18px text-rose-700">vaccines</span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-1.5">
+                <span class="text-2xl font-headline font-bold text-on-surface tabular-nums">@Model.Data.VacunacionesUrgentesHoy</span>
+                <span class="text-11px text-on-surface-variant">urgentes</span>
+            </div>
+            <div class="text-10px text-rose-700 font-semibold mt-1">Biológicos programados</div>
+        </div>
+    </div>
+
+    <!-- 3. NAVEGACIÓN POR PESTAÑAS (TABS) -->
+    <div class="border-b border-outline-variant flex items-center gap-6 text-xs font-bold">
+        <button type="button" id="tab-btn-padron" onclick="cambiarTab('padron')" class="pb-3 text-primary border-b-2 border-primary flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-18px">list_alt</span>
+            <span>Padrón de Cerdos &amp; Edición (@Model.Data.TotalCerdos)</span>
+        </button>
+        <button type="button" id="tab-btn-jaulas" onclick="cambiarTab('jaulas')" class="pb-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-18px">fence</span>
+            <span>Radar de Jaulas &amp; Capacidad (@Model.Data.Jaulas.Count)</span>
+        </button>
+        <button type="button" id="tab-btn-calculadora" onclick="cambiarTab('calculadora')" class="pb-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-18px">calculate</span>
+            <span>Simulador de Edad, Vacunas &amp; Raciones</span>
+        </button>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- CONTENIDO TAB 1: PADRÓN DE CERDOS & EDITOR -->
+    <!-- ========================================================================= -->
+    <div id="tab-content-padron" class="flex flex-col gap-4">
+        <!-- Barra de Filtros y Búsqueda -->
+        <form method="get" class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+            <div class="flex items-center gap-2 flex-wrap w-full md:w-auto">
+                <span class="text-xs font-bold text-on-surface-variant">Filtrar por Etapa:</span>
+                @{
+                    var etapas = new[] { "Todas", "Maternidad", "Precebo", "Crecimiento", "Engorde", "Gestación" };
+                }
+                @foreach (var et in etapas)
+                {
+                    bool activa = (string.IsNullOrEmpty(Model.EtapaFiltro) && et == "Todas") || string.Equals(Model.EtapaFiltro, et, StringComparison.OrdinalIgnoreCase);
+                    <a href="/Cerdos?etapa=@et&busqueda=@Model.Busqueda" class="px-3 py-1 rounded-full text-xs font-bold transition-colors @(activa ? "bg-primary text-on-primary shadow-xs" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container")">
+                        @et
+                    </a>
+                }
+            </div>
+
+            <div class="flex items-center gap-2 w-full md:w-80">
+                <div class="relative w-full">
+                    <span class="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-18px">search</span>
+                    <input type="text" name="busqueda" value="@Model.Busqueda" placeholder="Buscar por crotal, RFID, jaula..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest focus:outline-none focus:border-primary">
+                </div>
+                <button type="submit" class="px-3 py-1.5 bg-surface-container text-on-surface text-xs font-bold rounded-lg hover:bg-surface-container-high transition-colors">
+                    Buscar
+                </button>
+                @if (!string.IsNullOrEmpty(Model.Busqueda) || !string.IsNullOrEmpty(Model.EtapaFiltro))
+                {
+                    <a href="/Cerdos" title="Limpiar filtros" class="p-1.5 text-on-surface-variant hover:text-red-700 transition-colors">
+                        <span class="material-symbols-outlined text-18px">refresh</span>
+                    </a>
+                }
+            </div>
+        </form>
+
+        <!-- Tabla de Cerdos con Clasificación de Edad, Alimento Dividido y Vacunas -->
+        <div class="overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="border-b border-outline-variant bg-surface-container-low/60 text-on-surface-variant font-bold">
+                        <th class="p-3">Crotal / Identificación</th>
+                        <th class="p-3">Sexo &amp; Genética</th>
+                        <th class="p-3">F. Nacimiento &amp; Edad</th>
+                        <th class="p-3">Peso &amp; Etapa</th>
+                        <th class="p-3">Jaula / Ubicación</th>
+                        <th class="p-3">Alimentación Diaria (Tomas)</th>
+                        <th class="p-3">Próxima Vacunación</th>
+                        <th class="p-3 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant/60">
+                    @if (!Model.Data.Cerdos.Any())
+                    {
+                        <tr>
+                            <td colspan="8" class="p-8 text-center text-on-surface-variant">
+                                <span class="material-symbols-outlined text-40px text-outline">search_off</span>
+                                <div class="mt-2 font-bold text-sm">No se encontraron cerdos con los filtros seleccionados</div>
+                                <div class="text-xs text-outline mt-0.5">Haga clic en "Registrar Cerdo" para incorporar uno nuevo.</div>
+                            </td>
+                        </tr>
+                    }
+                    @foreach (var cerdo in Model.Data.Cerdos)
+                    {
+                        <tr class="hover:bg-surface-container-low/40 transition-colors">
+                            <!-- Crotal & RFID -->
+                            <td class="p-3 font-semibold text-on-surface">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                                        <span class="material-symbols-outlined text-16px">tag</span>
+                                    </div>
+                                    <div>
+                                        <div class="font-bold text-on-surface">@cerdo.Crotal</div>
+                                        <div class="text-10px text-on-surface-variant">@(string.IsNullOrEmpty(cerdo.Rfid) ? "Sin RFID" : cerdo.Rfid)</div>
+                                    </div>
+                                </div>
+                            </td>
+
+                            <!-- Sexo & Raza -->
+                            <td class="p-3">
+                                <div class="font-medium text-on-surface">@cerdo.Sexo</div>
+                                <div class="text-10px text-on-surface-variant">@cerdo.LineaGenetica</div>
+                            </td>
+
+                            <!-- Nacimiento & Días de Vida -->
+                            <td class="p-3">
+                                <div class="font-bold text-on-surface tabular-nums">@cerdo.DiasVida días de nacido</div>
+                                <div class="text-10px text-on-surface-variant">Nac: @cerdo.FechaNacimiento.ToString("dd/MM/yyyy")</div>
+                            </td>
+
+                            <!-- Peso & Etapa Clasificada -->
+                            <td class="p-3">
+                                <div class="font-bold text-on-surface tabular-nums">@cerdo.PesoActualKg.ToString("N2") kg</div>
+                                <span class="inline-flex items-center gap-1 text-10px font-bold px-2 py-0.5 rounded-full mt-0.5 
+                                    @(cerdo.EtapaActual.Contains("Lactancia") ? "bg-pink-100 text-pink-800 border border-pink-200" :
+                                      cerdo.EtapaActual.Contains("Precebo") ? "bg-amber-100 text-amber-900 border border-amber-300" :
+                                      cerdo.EtapaActual.Contains("Crecimiento") ? "bg-indigo-100 text-indigo-900 border border-indigo-200" :
+                                      cerdo.EtapaActual.Contains("Engorde") ? "bg-emerald-100 text-emerald-900 border border-emerald-300" :
+                                      "bg-purple-100 text-purple-900 border border-purple-200")">
+                                    @cerdo.EtapaActual
+                                </span>
+                            </td>
+
+                            <!-- Jaula Asignada -->
+                            <td class="p-3">
+                                <div class="font-bold text-primary flex items-center gap-1">
+                                    <span class="material-symbols-outlined text-14px">fence</span>
+                                    @cerdo.JaulaCodigo
+                                </div>
+                                <div class="text-10px text-on-surface-variant">@cerdo.JaulaNombre</div>
+                            </td>
+
+                            <!-- Plan de Alimentación Dividido por Tomas -->
+                            <td class="p-3">
+                                <div class="font-bold text-on-surface tabular-nums">
+                                    @cerdo.ConsumoDiarioKg.ToString("N2") kg/día 
+                                    <span class="text-primary font-bold">(@cerdo.TomasAlDia tomas de @cerdo.CantidadPorTomaGramos g)</span>
+                                </div>
+                                <div class="text-10px text-on-surface-variant truncate max-w-xs" title="@cerdo.AlimentoTipo - Horarios: @cerdo.HorariosSugeridos">
+                                    @cerdo.AlimentoTipo | <span class="font-semibold text-outline">@cerdo.HorariosSugeridos</span>
+                                </div>
+                            </td>
+
+                            <!-- Próxima Vacuna -->
+                            <td class="p-3">
+                                <div class="font-semibold text-on-surface truncate max-w-xs" title="@cerdo.ProximaVacunaNombre">
+                                    @cerdo.ProximaVacunaNombre
+                                </div>
+                                <span class="inline-flex items-center gap-1 text-10px font-bold px-2 py-0.5 rounded-full mt-0.5 @cerdo.ProximaVacunaBadgeClass">
+                                    <span class="material-symbols-outlined text-12px">vaccines</span>
+                                    @cerdo.ProximaVacunaEstado
+                                </span>
+                            </td>
+
+                            <!-- Acciones -->
+                            <td class="p-3 text-right">
+                                <div class="flex items-center justify-end gap-1.5">
+                                    <button type="button" onclick="verFichaCerdo('@cerdo.Id')" title="Ver Ficha Zootécnica y Sanitaria" class="p-1.5 rounded-lg border border-outline-variant hover:bg-surface-container text-primary transition-colors">
+                                        <span class="material-symbols-outlined text-16px">clinical_notes</span>
+                                    </button>
+                                    <button type="button" onclick="editarCerdo('@cerdo.Id')" title="Editar datos del cerdo" class="p-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors font-bold">
+                                        <span class="material-symbols-outlined text-16px">edit</span>
+                                    </button>
+                                    <form method="post" asp-page-handler="EliminarCerdo" onsubmit="return confirm('¿Está seguro de dar de baja el cerdo @cerdo.Crotal? Se liberará el cupo en su jaula.')" class="inline">
+                                        <input type="hidden" name="id" value="@cerdo.Id" />
+                                        <input type="hidden" name="crotal" value="@cerdo.Crotal" />
+                                        <button type="submit" title="Dar de baja" class="p-1.5 rounded-lg border border-outline-variant hover:bg-red-50 text-red-700 transition-colors">
+                                            <span class="material-symbols-outlined text-16px">delete</span>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- CONTENIDO TAB 2: RADAR DE JAULAS Y CAPACIDAD SEGÚN ETAPA -->
+    <!-- ========================================================================= -->
+    <div id="tab-content-jaulas" class="hidden flex-col gap-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-xl border border-outline-variant bg-surface-container-lowest">
+            <div>
+                <h3 class="font-headline font-bold text-sm text-on-surface">Capacidad de Jaulas y Corrales según Etapa Zootécnica</h3>
+                <p class="text-xs text-on-surface-variant">Diseño estándar de galpones con 6 jaulas técnicas (5.0m fondo × 3.0m ancho = 15.0 m²). Capacidad: 15-20 lechones ó 5-6 cerdos adultos.</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <button type="button" onclick="filtrarJaulas('Todas')" class="jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-primary text-on-primary">Todas</button>
+                <button type="button" onclick="filtrarJaulas('Maternidad')" class="jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-surface-container-low text-on-surface-variant hover:bg-surface-container">Maternidad</button>
+                <button type="button" onclick="filtrarJaulas('Precebo')" class="jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-surface-container-low text-on-surface-variant hover:bg-surface-container">Precebo</button>
+                <button type="button" onclick="filtrarJaulas('Crecimiento')" class="jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-surface-container-low text-on-surface-variant hover:bg-surface-container">Crecimiento</button>
+                <button type="button" onclick="filtrarJaulas('Engorde')" class="jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-surface-container-low text-on-surface-variant hover:bg-surface-container">Engorde</button>
+                <button type="button" onclick="filtrarJaulas('Gestación')" class="jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-surface-container-low text-on-surface-variant hover:bg-surface-container">Gestación</button>
+            </div>
+        </div>
+
+        <!-- Banner de Especificación Técnica de Galpones y Jaulas -->
+        <div class="p-3.5 rounded-xl bg-primary-fixed/20 border border-primary/30 flex items-start gap-3 text-xs">
+            <span class="material-symbols-outlined text-primary text-[22px] shrink-0">architecture</span>
+            <div class="flex flex-col gap-0.5">
+                <span class="font-bold text-on-surface">Diseño Constructivo de Galpones: 6 Jaulas Técnicas por Galpón (5m × 3m = 15 m²)</span>
+                <p class="text-on-surface-variant leading-relaxed">
+                    Cada galpón cuenta por norma con <strong>6 jaulas técnicas</strong> de <strong>5.00 m de fondo por 3.00 m de ancho</strong> (Área total útil = 15.0 m²). 
+                    Capacidad zootécnica reglamentada: <strong>15 a 20 lechones</strong> en etapa de recría / precebo (0.75 - 1.0 m²/lechon) o <strong>5 a 6 cerdos adultos</strong> en etapa de finalización / engorde (2.5 - 3.0 m²/adulto).
+                </p>
+            </div>
+        </div>
+
+        <!-- Grid de Jaulas / Corrales -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="grid-jaulas">
+            @foreach (var j in Model.Data.Jaulas)
+            {
+                <div class="jaula-card p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between gap-3 hover:border-primary/50 transition-all" data-etapa="@j.EtapaZootecnica">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded-lg bg-teal-50 text-teal-800 flex items-center justify-center font-bold">
+                                    <span class="material-symbols-outlined text-18px">fence</span>
+                                </div>
+                                <div>
+                                    <div class="font-bold text-sm text-on-surface">@j.Codigo</div>
+                                    <div class="text-11px text-on-surface-variant">@j.Nombre</div>
+                                </div>
+                            </div>
+                            <span class="inline-flex items-center gap-1 text-10px font-bold px-2 py-0.5 rounded-full border @j.EstadoBadgeClass">
+                                @j.EstadoBadge
+                            </span>
+                        </div>
+
+                        <!-- Barra de Capacidad -->
+                        <div class="mt-3">
+                            <div class="flex items-center justify-between text-xs mb-1">
+                                <span class="font-medium text-on-surface-variant">Ocupación: <strong class="text-on-surface tabular-nums">@j.OcupacionActual / @j.CapacidadMaxima</strong> cabezas</span>
+                                <span class="font-bold text-primary tabular-nums">@j.PorcentajeOcupacion%</span>
+                            </div>
+                            <div class="w-full bg-surface-container rounded-full h-2 overflow-hidden">
+                                <div class="h-2 rounded-full @(j.PorcentajeOcupacion > 99 ? "bg-red-600" : j.PorcentajeOcupacion > 75 ? "bg-amber-600" : "bg-emerald-600")" 
+                                     style="width: @Math.Min(100, j.PorcentajeOcupacion)%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Datos Técnicos y Medidas -->
+                        <div class="mt-3 pt-2.5 border-t border-outline-variant/60 flex flex-col gap-1.5 text-11px">
+                            <div class="flex items-center justify-between">
+                                <span class="text-outline">Etapa zootécnica:</span>
+                                <span class="font-bold text-on-surface">@j.EtapaZootecnica</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-outline">Dimensiones físicas:</span>
+                                <span class="font-bold text-primary">@j.DimensionesTexto</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-outline">Capacidad reglamentada:</span>
+                                <span class="font-semibold text-on-surface">@j.CapacidadesTexto</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-outline">Cupo disponible actual:</span>
+                                <span class="font-bold text-emerald-800 tabular-nums">@j.CupoDisponible cabezas</span>
+                            </div>
+                            <div class="text-outline text-10px mt-0.5 truncate" title="@j.TipoInstalacion">
+                                <span class="material-symbols-outlined text-12px align-middle text-primary">info</span>
+                                @j.TipoInstalacion
+                            </div>
+                        </div>
+
+                        <!-- Cerdos Alojados -->
+                        <div class="mt-2.5">
+                            <div class="text-10px uppercase font-bold text-outline tracking-wider mb-1">Cerdos en esta jaula:</div>
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @if (j.CerdosAlojados.Any())
+                                {
+                                    @foreach (var crotal in j.CerdosAlojados)
+                                    {
+                                        <span class="inline-flex items-center gap-0.5 px-2 py-0.5 bg-surface-container text-on-surface rounded text-10px font-semibold">
+                                            <span class="material-symbols-outlined text-10px text-primary">pets</span>
+                                            @crotal
+                                        </span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-10px text-outline italic">Actualmente sin cerdos asignados</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-2 pt-2 border-t border-outline-variant/60 flex items-center justify-end">
+                        <button type="button" onclick="asignarCerdoAJaula('@j.Id', '@j.Codigo', '@j.EtapaZootecnica')" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container hover:bg-primary hover:text-on-primary text-xs font-bold transition-colors">
+                            <span class="material-symbols-outlined text-14px">add</span>
+                            <span>Asignar Cerdo</span>
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- CONTENIDO TAB 3: SIMULADOR DE EDAD, VACUNAS & ALIMENTACIÓN -->
+    <!-- ========================================================================= -->
+    <div id="tab-content-calculadora" class="hidden flex-col gap-6">
+        <div class="p-5 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs">
+            <h3 class="font-headline font-bold text-base text-on-surface flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary">calculate</span>
+                <span>Motor Dinámico de Clasificación Zootécnica, Vacunal &amp; Nutricional</span>
+            </h3>
+            <p class="text-xs text-on-surface-variant mt-1">
+                Ingrese cualquier fecha de nacimiento y peso corporal para simular la edad en días, clasificar la etapa productiva, generar el plan vacunal cronológico y calcular la ración de alimento dividida por tomas.
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 rounded-xl bg-surface-container-low border border-outline-variant/80">
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Fecha de Nacimiento del Cerdo:</label>
+                    <input type="date" id="sim-fecha-nac" value="@DateTime.Today.AddDays(-35).ToString("yyyy-MM-dd")" onchange="ejecutarSimulador()" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Peso Actual Estimado (Kg):</label>
+                    <input type="number" id="sim-peso" step="0.1" min="1.0" max="300.0" value="10.5" oninput="ejecutarSimulador()" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
+                </div>
+            </div>
+
+            <!-- Resultados en Vivo del Simulador -->
+            <div id="sim-resultados" class="mt-6 flex flex-col gap-5">
+                <!-- Se inyecta dinámicamente con JS -->
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODAL: REGISTRAR / EDITAR CERDO CON CÁLCULO EN VIVO -->
+<!-- ========================================================================= -->
+<div id="modal-cerdo" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-surface-container-lowest rounded-2xl border border-outline-variant shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-scale-up">
+        <div class="px-6 py-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-low/40">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-24px">pets</span>
+                <div>
+                    <h2 class="font-headline font-bold text-base text-on-surface" id="modal-cerdo-titulo">Registrar Nuevo Cerdo</h2>
+                    <p class="text-11px text-on-surface-variant">Los días de nacido clasificarán automáticamente la etapa, alimento y vacunas.</p>
+                </div>
+            </div>
+            <button type="button" onclick="cerrarModalCerdo()" class="text-on-surface-variant hover:text-on-surface">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+
+        <form method="post" asp-page-handler="GuardarCerdo" class="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+            <input type="hidden" name="Id" id="input-cerdo-id" value="" />
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Crotal -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Crotal / Arete Oficial: *</label>
+                    <input type="text" name="Crotal" id="input-cerdo-crotal" required placeholder="Ej. CR-450" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest focus:outline-none focus:border-primary font-bold uppercase">
+                </div>
+
+                <!-- RFID -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">RFID / Microchip Electrónico:</label>
+                    <input type="text" name="Rfid" id="input-cerdo-rfid" placeholder="Ej. RFID-982045" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest focus:outline-none focus:border-primary font-medium">
+                </div>
+
+                <!-- Sexo -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Sexo / Condición: *</label>
+                    <select name="Sexo" id="input-cerdo-sexo" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
+                        <option value="Hembra">Hembra</option>
+                        <option value="Macho">Macho Entero</option>
+                        <option value="Castrado">Macho Castrado</option>
+                    </select>
+                </div>
+
+                <!-- Línea Genética -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Línea Genética / Raza: *</label>
+                    <select name="LineaGenetica" id="input-cerdo-genetica" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
+                        <option value="Topigs Norsvin 70">Topigs Norsvin TN70 (Excelente Prolificidad)</option>
+                        <option value="Pietrain Belga">Pietrain Belga (Alto Rendimiento Magro)</option>
+                        <option value="Duroc Talent">Duroc Talent (Calidad de Carne &amp; Vigor)</option>
+                        <option value="Landrace DanBred">Landrace DanBred (Maternal Danés)</option>
+                        <option value="Large White">Large White (Habilidad Materna)</option>
+                        <option value="Pietrain x Duroc">Cruce Terminal Pietrain x Duroc</option>
+                    </select>
+                </div>
+
+                <!-- Fecha de Nacimiento -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Fecha de Nacimiento: *</label>
+                    <input type="date" name="FechaNacimiento" id="input-cerdo-fechanac" required value="@DateTime.Today.AddDays(-28).ToString("yyyy-MM-dd")" onchange="recalcularModalEnVivo()" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-bold text-primary focus:outline-none focus:border-primary">
+                </div>
+
+                <!-- Peso Actual -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Peso Actual (Kg): *</label>
+                    <input type="number" step="0.1" min="0.5" max="350.0" name="PesoActualKg" id="input-cerdo-peso" required value="7.5" oninput="recalcularModalEnVivo()" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-bold focus:outline-none focus:border-primary">
+                </div>
+
+                <!-- Jaula / Corral Asignado -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Jaula / Corral Asignado:</label>
+                    <select name="JaulaCorralId" id="input-cerdo-jaula" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
+                        <option value="">-- Sin jaula asignada --</option>
+                        @foreach (var j in Model.Data.Jaulas)
+                        {
+                            <option value="@j.Id" data-etapa="@j.EtapaZootecnica">
+                                @j.Codigo - @j.Nombre (@j.EtapaZootecnica, @j.OcupacionActual/@j.CapacidadMaxima cabezas)
+                            </option>
+                        }
+                    </select>
+                </div>
+
+                <!-- Estatus Sanitario -->
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Estatus Sanitario:</label>
+                    <select name="EstatusSanitario" id="input-cerdo-sanitario" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
+                        <option value="Saludable">Saludable / Óptimo</option>
+                        <option value="En Tratamiento">En Tratamiento Veterinario</option>
+                        <option value="Cuarentena">Aislamiento / Cuarentena</option>
+                        <option value="Observación">En Observación Post-Destete</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Observaciones -->
+            <div>
+                <label class="block text-xs font-bold text-on-surface mb-1">Observaciones / Notas Clínicas:</label>
+                <input type="text" name="Observaciones" id="input-cerdo-obs" placeholder="Ej. Camada 14 lechones, vigoroso, peso al nacer 1.4kg" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest focus:outline-none focus:border-primary">
+            </div>
+
+            <!-- TARJETA REACTIVA EN VIVO EN EL MODAL -->
+            <div id="modal-preview-calculo" class="p-4 rounded-xl bg-surface-container border border-outline-variant flex flex-col gap-3">
+                <!-- Se actualiza dinámicamente -->
+            </div>
+
+            <!-- Footer con Botones -->
+            <div class="pt-3 border-t border-outline-variant flex items-center justify-end gap-3">
+                <button type="button" onclick="cerrarModalCerdo()" class="px-4 py-2 rounded-lg border border-outline-variant text-on-surface text-xs font-bold hover:bg-surface-container transition-colors">
+                    Cancelar
+                </button>
+                <button type="submit" class="px-5 py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition-all shadow-sm flex items-center gap-2">
+                    <span class="material-symbols-outlined text-18px">save</span>
+                    <span>Guardar Cerdo</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODAL: FICHA TÉCNICA ZOOTÉCNICA COMPLETA DE UN CERDO -->
+<!-- ========================================================================= -->
+<div id="modal-ficha" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-surface-container-lowest rounded-2xl border border-outline-variant shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-scale-up">
+        <div class="px-6 py-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-low/40">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-24px">clinical_notes</span>
+                <div>
+                    <h2 class="font-headline font-bold text-base text-on-surface" id="modal-ficha-titulo">Ficha Zootécnica &amp; Sanitaria</h2>
+                    <p class="text-11px text-on-surface-variant">Trazabilidad completa, racionamiento nutricional y calendario de profilaxis biológica.</p>
+                </div>
+            </div>
+            <button type="button" onclick="cerrarModalFicha()" class="text-on-surface-variant hover:text-on-surface">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-6 flex flex-col gap-5" id="modal-ficha-body">
+            <!-- Se inyecta dinámicamente con JS -->
+        </div>
+
+        <div class="px-6 py-3 border-t border-outline-variant bg-surface-container-low/40 flex items-center justify-between">
+            <span class="text-11px text-outline">Datos sincronizados con PostgreSQL central <strong>agropig_db</strong></span>
+            <button type="button" onclick="cerrarModalFicha()" class="px-4 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold hover:bg-secondary">
+                Cerrar Ficha
+            </button>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    // Colecciones serializadas del servidor
+    const cerdosData = @Html.Raw(cerdosJson);
+    const jaulasData = @Html.Raw(jaulasJson);
+
+    // Motor de Cálculo Zootécnico en JavaScript idéntico al motor C#
+    function calcularPlanZootecnicoJS(fechaNacStr, peso) {
+        const fechaNac = new Date(fechaNacStr + "T00:00:00");
+        const hoy = new Date();
+        hoy.setHours(0,0,0,0);
+
+        const diffTime = hoy - fechaNac;
+        const diasVida = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+
+        let etapa = "";
+        let subEtapa = "";
+        let jaulaTipo = "";
+        let rangoPeso = "";
+        let alimento = "";
+        let racionKg = 0.10;
+        let tomas = 5;
+        let horarios = "";
+        let recomendacion = "";
+
+        if (diasVida <= 28) {
+            etapa = "Lactancia (Maternidad)";
+            subEtapa = "Lechón Lactante";
+            jaulaTipo = "Maternidad";
+            rangoPeso = "1.4 - 7.0 kg";
+            alimento = "Preiniciador Fase 1 (Creep Feeding Micro-pellet)";
+            racionKg = 0.10;
+            tomas = 5;
+            horarios = "06:30, 09:30, 12:30, 15:30, 18:30";
+            recomendacion = "Alimentación en platos lamedores limpios para acostumbrar el aparato digestivo previo al destete.";
+        } else if (diasVida <= 45) {
+            etapa = "Precebo Fase 1";
+            subEtapa = "Destete Inmediato";
+            jaulaTipo = "Precebo";
+            rangoPeso = "7.0 - 15.0 kg";
+            alimento = "Preiniciador Fase 2 (Pellet con Plasma Porcino Alta Digestibilidad)";
+            racionKg = 0.50;
+            tomas = 4;
+            horarios = "07:00, 11:00, 15:00, 19:00";
+            recomendacion = "Dividir en 4 tomas pequeñas para prevenir acidosis digestiva y diarreas de transición post-destete.";
+        } else if (diasVida <= 70) {
+            etapa = "Precebo Fase 2";
+            subEtapa = "Iniciador / Transición";
+            jaulaTipo = "Precebo";
+            rangoPeso = "15.0 - 28.0 kg";
+            alimento = "Iniciador Lecherón (20% Proteína Cruda)";
+            racionKg = 1.10;
+            tomas = 4;
+            horarios = "07:00, 11:00, 15:00, 19:00";
+            recomendacion = "Monitorear Ganancia Media Diaria meta (450 - 520 g/día) y flujo continuo de agua fresca (0.8 L/min).";
+        } else if (diasVida <= 115) {
+            etapa = "Crecimiento / Levante";
+            subEtapa = "Desarrollo Muscular Magro";
+            jaulaTipo = "Crecimiento";
+            rangoPeso = "28.0 - 65.0 kg";
+            alimento = "Crecimiento / Desarrollo (17% Proteína Cruda, FCR ~2.1)";
+            racionKg = 1.95;
+            tomas = 3;
+            horarios = "07:00, 13:00, 18:00";
+            recomendacion = "3 tomas distribuidas para maximizar absorción de aminoácidos esenciales y depósito de magro.";
+        } else if (diasVida <= 165) {
+            etapa = "Engorde / Acabado Final";
+            subEtapa = "Terminación Peso Frigorífico";
+            jaulaTipo = "Engorde";
+            rangoPeso = "65.0 - 115.0+ kg";
+            alimento = "Finalizador / Engorde Comercial (Alta Energía Neta)";
+            racionKg = 2.80;
+            tomas = 2;
+            horarios = "07:30, 16:30";
+            recomendacion = "2 raciones abundantes mañana y tarde. Control estricto del periodo de retiro sanitario de promotores.";
+        } else {
+            etapa = "Gestación / Reproductor";
+            subEtapa = "Vientre Adulto en Mantenimiento";
+            jaulaTipo = "Gestación";
+            rangoPeso = "120.0 - 220.0 kg";
+            alimento = "Gestación Controlada (Alta Fibra saciante)";
+            racionKg = 2.20;
+            tomas = 2;
+            horarios = "07:00, 16:00";
+            recomendacion = "2 tomas exactas para mantener condición corporal entre 3.0 y 3.5. Evitar sobrepeso gestacional.";
+        }
+
+        const gramosPorToma = Math.round((racionKg * 1000) / tomas);
+
+        // Plan vacunal
+        const vacunasDef = [
+            { dia: 3, vac: "Hierro Dextrano 200mg + Toltrazuril 5%", enf: "Anemia ferropénica y Coccidiosis neonatal", dosis: "2.0 ml IM + 1.0 ml VO", via: "Intramuscular profunda / Oral" },
+            { dia: 7, vac: "Mycoplasma hyopneumoniae Dosis 1", enf: "Neumonía Enzoótica Porcina", dosis: "2.0 ml IM", via: "Intramuscular tabla del cuello" },
+            { dia: 21, vac: "Circovirus PCV2 + Mycoplasma Refuerzo", enf: "Desmedro multisistémico y Neumonía", dosis: "2.0 ml IM", via: "Intramuscular tabla del cuello" },
+            { dia: 35, vac: "Peste Porcina Clásica (PPC Cepa China)", enf: "Inmunización oficial preventiva", dosis: "2.0 ml IM", via: "Intramuscular profunda" },
+            { dia: 50, vac: "Erisipela Porcina + Actinobacillus (APP)", enf: "Mal Rojo y Pleuroneumonía aguda", dosis: "2.0 ml IM", via: "Intramuscular tabla del cuello" },
+            { dia: 70, vac: "Desparasitación Interna y Externa", enf: "Ascaris suum, Stephanurus, Sarna", dosis: "1.0 ml / 33 kg SC", via: "Subcutánea retroauricular" },
+            { dia: 90, vac: "Refuerzo Complejo Respiratorio PRDC", enf: "Complejo respiratorio porcino", dosis: "2.0 ml IM", via: "Intramuscular" },
+            { dia: 150, vac: "Vacuna PLE (Parvo + Lepto + Erisipela)", enf: "Fallas reproductivas en reemplazos", dosis: "2.0 ml IM", via: "Intramuscular profunda" }
+        ];
+
+        const vacunas = vacunasDef.map(v => {
+            const fechaEstimada = new Date(fechaNac.getTime() + (v.dia * 24 * 60 * 60 * 1000));
+            const dif = diasVida - v.dia;
+            let estado = "";
+            let badge = "";
+            let icono = "";
+
+            if (dif > 3) {
+                estado = "Aplicada / Histórica";
+                badge = "bg-emerald-100 text-emerald-800 border border-emerald-300";
+                icono = "check_circle";
+            } else if (Math.abs(dif) <= 3) {
+                estado = "URGENTE / Toca Hoy";
+                badge = "bg-amber-100 text-amber-900 border border-amber-300 font-bold";
+                icono = "notification_important";
+            } else {
+                const faltan = v.dia - diasVida;
+                estado = `Programada (en ${faltan} d)`;
+                badge = "bg-blue-100 text-blue-800 border border-blue-200";
+                icono = "schedule";
+            }
+
+            return {
+                dia: v.dia,
+                fechaEstimada: fechaEstimada.toISOString().split("T")[0],
+                vacuna: v.vac,
+                enfermedad: v.enf,
+                dosis: v.dosis,
+                via: v.via,
+                estado: estado,
+                badge: badge,
+                icono: icono
+            };
+        });
+
+        return {
+            diasVida: diasVida,
+            etapa: etapa,
+            subEtapa: subEtapa,
+            jaulaTipo: jaulaTipo,
+            rangoPeso: rangoPeso,
+            alimento: alimento,
+            racionKg: racionKg,
+            tomas: tomas,
+            gramosPorToma: gramosPorToma,
+            horarios: horarios,
+            recomendacion: recomendacion,
+            vacunas: vacunas
+        };
+    }
+
+    // Pestañas (Tabs)
+    function cambiarTab(tab) {
+        document.getElementById("tab-content-padron").classList.add("hidden");
+        document.getElementById("tab-content-jaulas").classList.add("hidden");
+        document.getElementById("tab-content-calculadora").classList.add("hidden");
+
+        document.getElementById("tab-btn-padron").className = "pb-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent flex items-center gap-2 transition-all";
+        document.getElementById("tab-btn-jaulas").className = "pb-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent flex items-center gap-2 transition-all";
+        document.getElementById("tab-btn-calculadora").className = "pb-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent flex items-center gap-2 transition-all";
+
+        if (tab === 'padron') {
+            document.getElementById("tab-content-padron").classList.remove("hidden");
+            document.getElementById("tab-btn-padron").className = "pb-3 text-primary border-b-2 border-primary flex items-center gap-2 transition-all font-bold";
+        } else if (tab === 'jaulas') {
+            document.getElementById("tab-content-jaulas").classList.remove("hidden");
+            document.getElementById("tab-btn-jaulas").className = "pb-3 text-primary border-b-2 border-primary flex items-center gap-2 transition-all font-bold";
+        } else if (tab === 'calculadora') {
+            document.getElementById("tab-content-calculadora").classList.remove("hidden");
+            document.getElementById("tab-btn-calculadora").className = "pb-3 text-primary border-b-2 border-primary flex items-center gap-2 transition-all font-bold";
+            ejecutarSimulador();
+        }
+    }
+
+    // Filtro de Jaulas
+    function filtrarJaulas(etapa) {
+        const cards = document.querySelectorAll(".jaula-card");
+        cards.forEach(card => {
+            if (etapa === 'Todas' || card.getAttribute("data-etapa").toLowerCase().includes(etapa.toLowerCase())) {
+                card.classList.remove("hidden");
+            } else {
+                card.classList.add("hidden");
+            }
+        });
+
+        const btns = document.querySelectorAll(".jaula-filtro-btn");
+        btns.forEach(btn => {
+            if (btn.innerText.trim() === etapa) {
+                btn.className = "jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-primary text-on-primary";
+            } else {
+                btn.className = "jaula-filtro-btn px-3 py-1 rounded-full text-xs font-bold bg-surface-container-low text-on-surface-variant hover:bg-surface-container";
+            }
+        });
+    }
+
+    // Modal Cerdo
+    function abrirModalCerdo() {
+        document.getElementById("modal-cerdo-titulo").innerText = "Registrar Nuevo Cerdo en Piara";
+        document.getElementById("input-cerdo-id").value = "";
+        document.getElementById("input-cerdo-crotal").value = "";
+        document.getElementById("input-cerdo-rfid").value = "";
+        document.getElementById("input-cerdo-sexo").value = "Hembra";
+        document.getElementById("input-cerdo-fechanac").value = new Date().toISOString().split("T")[0];
+        document.getElementById("input-cerdo-peso").value = "1.5";
+        document.getElementById("input-cerdo-genetica").value = "Topigs Norsvin 70";
+        document.getElementById("input-cerdo-jaula").value = "";
+        document.getElementById("input-cerdo-sanitario").value = "Saludable";
+        document.getElementById("input-cerdo-obs").value = "";
+
+        recalcularModalEnVivo();
+        document.getElementById("modal-cerdo").classList.remove("hidden");
+        document.getElementById("modal-cerdo").classList.add("flex");
+    }
+
+    function editarCerdo(id) {
+        const cerdo = cerdosData.find(c => c.Id.toLowerCase() === id.toLowerCase());
+        if (!cerdo) return;
+
+        document.getElementById("modal-cerdo-titulo").innerText = "Editar Datos del Cerdo: " + cerdo.Crotal;
+        document.getElementById("input-cerdo-id").value = cerdo.Id;
+        document.getElementById("input-cerdo-crotal").value = cerdo.Crotal;
+        document.getElementById("input-cerdo-rfid").value = cerdo.Rfid || "";
+        document.getElementById("input-cerdo-sexo").value = cerdo.Sexo;
+        document.getElementById("input-cerdo-fechanac").value = cerdo.FechaNacimiento.split("T")[0];
+        document.getElementById("input-cerdo-peso").value = cerdo.PesoActualKg;
+        document.getElementById("input-cerdo-genetica").value = cerdo.LineaGenetica;
+        document.getElementById("input-cerdo-jaula").value = cerdo.JaulaCorralId || "";
+        document.getElementById("input-cerdo-sanitario").value = cerdo.EstatusSanitario;
+        document.getElementById("input-cerdo-obs").value = cerdo.Observaciones || "";
+
+        recalcularModalEnVivo();
+        document.getElementById("modal-cerdo").classList.remove("hidden");
+        document.getElementById("modal-cerdo").classList.add("flex");
+    }
+
+    function asignarCerdoAJaula(jaulaId, jaulaCodigo, etapa) {
+        abrirModalCerdo();
+        document.getElementById("input-cerdo-jaula").value = jaulaId;
+        // Pre-ajustar fecha aproximada según la etapa de la jaula
+        const hoy = new Date();
+        let diasAtras = 14;
+        if (etapa.includes("Precebo")) diasAtras = 40;
+        else if (etapa.includes("Crecimiento")) diasAtras = 90;
+        else if (etapa.includes("Engorde")) diasAtras = 135;
+        else if (etapa.includes("Gestación")) diasAtras = 220;
+
+        const f = new Date(hoy.getTime() - (diasAtras * 24 * 60 * 60 * 1000));
+        document.getElementById("input-cerdo-fechanac").value = f.toISOString().split("T")[0];
+        recalcularModalEnVivo();
+    }
+
+    function cerrarModalCerdo() {
+        document.getElementById("modal-cerdo").classList.add("hidden");
+        document.getElementById("modal-cerdo").classList.remove("flex");
+    }
+
+    function recalcularModalEnVivo() {
+        const fechaStr = document.getElementById("input-cerdo-fechanac").value;
+        const peso = parseFloat(document.getElementById("input-cerdo-peso").value) || 10;
+        if (!fechaStr) return;
+
+        const calc = calcularPlanZootecnicoJS(fechaStr, peso);
+
+        const proxVac = calc.vacunas.find(v => v.dia >= calc.diasVida) || calc.vacunas[calc.vacunas.length - 1];
+
+        const html = `
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase tracking-wider text-outline">Cálculo Automático por Días de Nacido:</span>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary text-on-primary">${calc.etapa}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60">
+                    <span class="text-outline text-10px uppercase font-bold">Edad & Fase:</span>
+                    <div class="font-bold text-on-surface text-sm mt-0.5">${calc.diasVida} días de vida</div>
+                    <div class="text-10px text-on-surface-variant">${calc.subEtapa} (Ref: ${calc.rangoPeso})</div>
+                </div>
+                <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60">
+                    <span class="text-outline text-10px uppercase font-bold">Ración Diaria Dividida:</span>
+                    <div class="font-bold text-primary text-sm mt-0.5">${calc.racionKg.toFixed(2)} kg/día</div>
+                    <div class="text-10px font-semibold text-on-surface">Dividido en <strong class="text-primary">${calc.tomas} tomas</strong> de <strong class="text-primary">${calc.gramosPorToma} g</strong></div>
+                </div>
+                <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60">
+                    <span class="text-outline text-10px uppercase font-bold">Próxima Vacunación:</span>
+                    <div class="font-bold text-on-surface truncate mt-0.5" title="${proxVac.vacuna}">${proxVac.vacuna}</div>
+                    <div class="text-10px font-semibold text-rose-700">Día ${proxVac.dia} (${proxVac.estado})</div>
+                </div>
+            </div>
+            <div class="text-10px text-on-surface-variant flex items-center gap-1.5 bg-surface-container-lowest p-2 rounded-lg border border-outline-variant/40">
+                <span class="material-symbols-outlined text-14px text-primary">schedule</span>
+                <span><strong>Horarios de servicio sugeridos:</strong> ${calc.horarios}</span>
+            </div>
+        `;
+
+        document.getElementById("modal-preview-calculo").innerHTML = html;
+    }
+
+    // Modal Ficha Completa
+    function verFichaCerdo(id) {
+        const cerdo = cerdosData.find(c => c.Id.toLowerCase() === id.toLowerCase());
+        if (!cerdo) return;
+
+        document.getElementById("modal-ficha-titulo").innerText = `Ficha Técnica Zootécnica - Cerdo ${cerdo.Crotal}`;
+
+        let vacunasRows = "";
+        cerdo.PlanVacunacion.forEach(v => {
+            const fechaStr = v.FechaEstimada.split("T")[0];
+            vacunasRows += `
+                <tr class="hover:bg-surface-container-low transition-colors">
+                    <td class="p-2.5 font-bold tabular-nums">Día ${v.DiaVidaProgramado}</td>
+                    <td class="p-2.5 font-medium tabular-nums">${fechaStr}</td>
+                    <td class="p-2.5 font-bold text-on-surface">${v.VacunaBiológico}</td>
+                    <td class="p-2.5 text-11px text-on-surface-variant">${v.EnfermedadPrevenida}</td>
+                    <td class="p-2.5 text-11px">${v.Dosis} (${v.Via})</td>
+                    <td class="p-2.5">
+                        <span class="inline-flex items-center gap-1 text-10px font-bold px-2 py-0.5 rounded-full ${v.BadgeClass}">
+                            <span class="material-symbols-outlined text-12px">${v.Icono}</span>
+                            ${v.Estado}
+                        </span>
+                    </td>
+                </tr>
+            `;
+        });
+
+        const html = `
+            <!-- Encabezado del Cerdo -->
+            <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl bg-primary text-on-primary flex items-center justify-center font-bold text-lg">
+                        <span class="material-symbols-outlined text-28px">pets</span>
+                    </div>
+                    <div>
+                        <div class="text-xl font-headline font-bold text-on-surface">${cerdo.Crotal} <span class="text-xs text-outline font-normal">(${cerdo.Rfid || "Sin RFID"})</span></div>
+                        <div class="text-xs text-on-surface-variant mt-0.5">${cerdo.Sexo} | ${cerdo.LineaGenetica} | Estatus: <strong class="text-emerald-700">${cerdo.EstatusSanitario}</strong></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="text-right">
+                        <div class="text-xs text-outline font-bold uppercase">Ubicación Actual</div>
+                        <div class="text-sm font-bold text-primary">${cerdo.JaulaCodigo} - ${cerdo.JaulaNombre}</div>
+                        <div class="text-10px text-on-surface-variant">${cerdo.GalponNombre}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Parámetros Zootécnicos Principales -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div class="p-3 rounded-xl border border-outline-variant bg-surface-container-lowest">
+                    <span class="text-outline text-10px font-bold uppercase">Edad Exacta</span>
+                    <div class="text-lg font-bold text-on-surface tabular-nums mt-0.5">${cerdo.DiasVida} días</div>
+                    <div class="text-10px text-outline">Nacido el ${cerdo.FechaNacimiento.split("T")[0]}</div>
+                </div>
+                <div class="p-3 rounded-xl border border-outline-variant bg-surface-container-lowest">
+                    <span class="text-outline text-10px font-bold uppercase">Peso Actual</span>
+                    <div class="text-lg font-bold text-on-surface tabular-nums mt-0.5">${cerdo.PesoActualKg.toFixed(2)} kg</div>
+                    <div class="text-10px text-primary font-semibold">${cerdo.SubEtapa}</div>
+                </div>
+                <div class="p-3 rounded-xl border border-outline-variant bg-surface-container-lowest">
+                    <span class="text-outline text-10px font-bold uppercase">Etapa Zootécnica</span>
+                    <div class="text-sm font-bold text-primary mt-1">${cerdo.EtapaActual}</div>
+                    <div class="text-10px text-outline">Clasificación zootécnica</div>
+                </div>
+                <div class="p-3 rounded-xl border border-outline-variant bg-surface-container-lowest">
+                    <span class="text-outline text-10px font-bold uppercase">Ración Diaria Total</span>
+                    <div class="text-lg font-bold text-emerald-800 tabular-nums mt-0.5">${cerdo.ConsumoDiarioKg.toFixed(2)} kg/día</div>
+                    <div class="text-10px text-outline">${cerdo.ConsumoDiarioGramos} gramos al día</div>
+                </div>
+            </div>
+
+            <!-- Desglose de Racionamiento Nutricional por Tomas -->
+            <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest">
+                <div class="flex items-center justify-between pb-2 border-b border-outline-variant/60">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-primary text-18px">restaurant</span>
+                        <h4 class="font-bold text-xs uppercase tracking-wider text-on-surface">Plan Nutricional: División de Tomas Diarias</h4>
+                    </div>
+                    <span class="px-2.5 py-0.5 rounded-full text-10px font-bold bg-primary/10 text-primary">
+                        ${cerdo.TomasAlDia} Tomas Diarias
+                    </span>
+                </div>
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div>
+                        <div class="text-outline text-11px font-bold">Fórmula / Tipo de Alimento:</div>
+                        <div class="font-bold text-on-surface mt-0.5">${cerdo.AlimentoTipo}</div>
+                        <div class="text-outline text-11px font-bold mt-2">Dosis por Toma:</div>
+                        <div class="text-sm font-bold text-primary mt-0.5">${cerdo.CantidadPorTomaGramos} gramos por servicio (${cerdo.CantidadPorTomaKg.toFixed(3)} kg)</div>
+                    </div>
+                    <div>
+                        <div class="text-outline text-11px font-bold">Horarios de Alimentación Recomendados:</div>
+                        <div class="font-bold text-on-surface mt-0.5 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-14px text-primary">schedule</span>
+                            ${cerdo.HorariosSugeridos}
+                        </div>
+                        <div class="text-10px text-on-surface-variant mt-2 bg-surface-container-low p-2 rounded-lg border border-outline-variant/40">
+                            <strong>Manejo:</strong> ${cerdo.RecomendacionNutricional}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendario Vacunal Cronológico -->
+            <div class="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
+                <div class="p-3.5 bg-surface-container-low/60 border-b border-outline-variant flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-rose-700 text-18px">vaccines</span>
+                        <h4 class="font-bold text-xs uppercase tracking-wider text-on-surface">Calendario Sanitario &amp; Profilaxis Biológica</h4>
+                    </div>
+                    <span class="text-11px font-medium text-outline">Proyectado según fecha de nacimiento</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="border-b border-outline-variant text-outline bg-surface-container-low/30 font-bold">
+                                <th class="p-2.5">Edad</th>
+                                <th class="p-2.5">Fecha Proyectada</th>
+                                <th class="p-2.5">Vacuna / Fármaco</th>
+                                <th class="p-2.5">Patógeno / Prevención</th>
+                                <th class="p-2.5">Dosis &amp; Vía</th>
+                                <th class="p-2.5">Estado para este Cerdo</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-outline-variant/40">
+                            ${vacunasRows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        document.getElementById("modal-ficha-body").innerHTML = html;
+        document.getElementById("modal-ficha").classList.remove("hidden");
+        document.getElementById("modal-ficha").classList.add("flex");
+    }
+
+    function cerrarModalFicha() {
+        document.getElementById("modal-ficha").classList.add("hidden");
+        document.getElementById("modal-ficha").classList.remove("flex");
+    }
+
+    function abrirModalCalculadora() {
+        cambiarTab('calculadora');
+    }
+
+    function ejecutarSimulador() {
+        const fechaStr = document.getElementById("sim-fecha-nac").value;
+        const peso = parseFloat(document.getElementById("sim-peso").value) || 12.0;
+        if (!fechaStr) return;
+
+        const calc = calcularPlanZootecnicoJS(fechaStr, peso);
+
+        let vacunasCards = "";
+        calc.vacunas.forEach(v => {
+            vacunasCards += `
+                <div class="p-3 rounded-lg border border-outline-variant/60 bg-surface-container-lowest flex items-center justify-between">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg bg-surface-container flex items-center justify-center font-bold text-xs text-primary">
+                            D${v.dia}
+                        </div>
+                        <div>
+                            <div class="font-bold text-xs text-on-surface">${v.vacuna}</div>
+                            <div class="text-10px text-on-surface-variant">${v.enfermedad} | ${v.dosis} (${v.via})</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-10px text-outline tabular-nums">${v.fechaEstimada}</div>
+                        <span class="inline-flex items-center gap-1 text-10px font-bold px-2 py-0.5 rounded-full mt-0.5 ${v.badge}">
+                            <span class="material-symbols-outlined text-12px">${v.icono}</span>
+                            ${v.estado}
+                        </span>
+                    </div>
+                </div>
+            `;
+        });
+
+        const html = `
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Clasificación -->
+                <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest flex flex-col justify-between">
+                    <div>
+                        <div class="text-xs font-bold uppercase tracking-wider text-outline">Clasificación por Edad</div>
+                        <div class="text-2xl font-headline font-bold text-primary mt-1">${calc.etapa}</div>
+                        <div class="text-xs font-semibold text-on-surface mt-1">${calc.subEtapa}</div>
+                        <div class="text-xs text-on-surface-variant mt-2">
+                            <strong>Días de vida:</strong> ${calc.diasVida} días<br/>
+                            <strong>Rango peso referencial:</strong> ${calc.rangoPeso}<br/>
+                            <strong>Jaula sugerida:</strong> ${calc.jaulaTipo}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nutrición y Tomas -->
+                <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest flex flex-col justify-between md:col-span-2">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs font-bold uppercase tracking-wider text-outline">Plan de Alimentación Diario Dividido</div>
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary text-on-primary">${calc.tomas} Tomas al Día</span>
+                        </div>
+                        <div class="text-xl font-headline font-bold text-on-surface mt-1">
+                            ${calc.racionKg.toFixed(2)} kg/día 
+                            <span class="text-primary text-sm font-semibold">(${calc.racionKg * 1000} g totales)</span>
+                        </div>
+                        <div class="text-xs text-on-surface-variant mt-1 font-semibold">${calc.alimento}</div>
+
+                        <div class="mt-3 p-3 rounded-lg bg-surface-container-low border border-outline-variant/60 grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                                <span class="text-outline text-10px font-bold">Cantidad por cada toma:</span>
+                                <div class="text-base font-bold text-primary mt-0.5">${calc.gramosPorToma} gramos / toma</div>
+                            </div>
+                            <div>
+                                <span class="text-outline text-10px font-bold">Horarios diarios sugeridos:</span>
+                                <div class="text-xs font-bold text-on-surface mt-0.5 flex items-center gap-1">
+                                    <span class="material-symbols-outlined text-14px text-primary">schedule</span>
+                                    ${calc.horarios}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="text-11px text-on-surface-variant mt-2">
+                            <strong>Recomendación zootécnica:</strong> ${calc.recomendacion}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendario de Vacunación Calculado -->
+            <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest">
+                <div class="flex items-center justify-between pb-2 border-b border-outline-variant/60">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-on-surface flex items-center gap-2">
+                        <span class="material-symbols-outlined text-rose-700 text-18px">vaccines</span>
+                        <span>Calendario Cronológico de Vacunas (para ${calc.diasVida} días de vida)</span>
+                    </h4>
+                    <span class="text-11px text-outline">8 biológicos y desparasitaciones</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3">
+                    ${vacunasCards}
+                </div>
+            </div>
+        `;
+
+        document.getElementById("sim-resultados").innerHTML = html;
+    }
+</script>
+}

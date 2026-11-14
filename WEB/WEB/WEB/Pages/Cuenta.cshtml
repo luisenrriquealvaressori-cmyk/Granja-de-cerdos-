@@ -1,0 +1,132 @@
+@page
+@model WEB.Pages.CuentaModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Mi Cuenta";
+    var user = RoleService.CurrentUser;
+}
+
+<main class="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <header>
+        <h1 class="font-headline text-2xl font-extrabold text-on-surface tracking-tight">Mi cuenta</h1>
+        <p class="text-sm text-on-surface-variant mt-1">Datos de tu perfil y seguridad de acceso.</p>
+    </header>
+
+    @if (Model.Obligatorio)
+    {
+        <div role="alert" class="rounded-2xl border border-amber-300 bg-amber-50 p-4 flex items-start gap-3 text-amber-900">
+            <span class="material-symbols-outlined text-amber-600 mt-0.5">key</span>
+            <div class="text-sm">
+                <p class="font-bold">Debes cambiar tu contraseña para continuar</p>
+                <p class="mt-0.5">Tu contraseña actual es temporal. Define una nueva (mínimo 8 caracteres, con letras y números).</p>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div role="alert" class="rounded-xl bg-error-container/70 border border-error/40 p-3.5 text-error text-sm font-medium flex items-center gap-2.5">
+            <span class="material-symbols-outlined">error</span><span>@Model.ErrorMessage</span>
+        </div>
+    }
+
+    <div class="grid md:grid-cols-5 gap-6">
+        <!-- Perfil -->
+        <section class="md:col-span-2 rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm overflow-hidden">
+            <div class="h-20 bg-gradient-to-br from-[#2b3719] via-[#3f4f2c] to-primary"></div>
+            <div class="px-5 pb-5 -mt-9">
+                <div class="w-[72px] h-[72px] rounded-2xl @user.AvatarColor flex items-center justify-center text-2xl font-extrabold font-headline shadow-lg ring-4 ring-white">
+                    @user.Iniciales
+                </div>
+                <h2 class="mt-3 font-headline text-lg font-extrabold text-on-surface">@user.Nombre</h2>
+                <p class="text-xs text-on-surface-variant">@user.Cargo</p>
+
+                <dl class="mt-4 space-y-3 text-xs">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined text-primary text-[18px]">mail</span>
+                        <div class="min-w-0"><dt class="text-outline">Correo</dt><dd class="font-semibold text-on-surface truncate">@user.Email</dd></div>
+                    </div>
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined text-primary text-[18px]">@user.Icono</span>
+                        <div><dt class="text-outline">Rol</dt><dd class="font-semibold text-on-surface">@user.Rol</dd></div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(user.Matricula))
+                    {
+                        <div class="flex items-center gap-2.5">
+                            <span class="material-symbols-outlined text-primary text-[18px]">badge</span>
+                            <div><dt class="text-outline">Matrícula profesional</dt><dd class="font-semibold text-on-surface">@user.Matricula</dd></div>
+                        </div>
+                    }
+                </dl>
+                <p class="mt-4 text-[11px] text-on-surface-variant leading-relaxed">@user.Descripcion</p>
+            </div>
+        </section>
+
+        <!-- Cambio de contraseña -->
+        <section class="md:col-span-3 rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm p-6">
+            <div class="flex items-center gap-3 mb-5">
+                <div class="w-10 h-10 rounded-xl bg-primary-fixed text-primary flex items-center justify-center"><span class="material-symbols-outlined">lock_reset</span></div>
+                <div>
+                    <h2 class="font-headline text-base font-extrabold text-on-surface">Cambiar contraseña</h2>
+                    <p class="text-xs text-on-surface-variant">Usa una contraseña única que no uses en otros servicios.</p>
+                </div>
+            </div>
+
+            <form method="post" asp-page-handler="CambiarPassword" class="space-y-4" id="pwdForm" novalidate>
+                <input type="hidden" name="Obligatorio" value="@Model.Obligatorio.ToString().ToLower()" />
+
+                <div>
+                    <label for="PasswordActual" class="block text-xs font-bold text-on-surface mb-1.5">Contraseña actual</label>
+                    <input id="PasswordActual" name="PasswordActual" type="password" required autocomplete="current-password"
+                           class="block w-full rounded-xl border-outline-variant text-sm py-2.5 focus:border-primary focus:ring-2 focus:ring-primary/20">
+                </div>
+                <div>
+                    <label for="PasswordNueva" class="block text-xs font-bold text-on-surface mb-1.5">Nueva contraseña</label>
+                    <input id="PasswordNueva" name="PasswordNueva" type="password" required minlength="8" autocomplete="new-password"
+                           class="block w-full rounded-xl border-outline-variant text-sm py-2.5 focus:border-primary focus:ring-2 focus:ring-primary/20">
+                    <div class="mt-2 h-1.5 rounded-full bg-surface-container overflow-hidden"><div id="strengthBar" class="h-full w-0 rounded-full transition-all duration-300"></div></div>
+                    <p id="strengthText" class="mt-1 text-[11px] text-outline">Mínimo 8 caracteres, con letras y números.</p>
+                </div>
+                <div>
+                    <label for="PasswordConfirmar" class="block text-xs font-bold text-on-surface mb-1.5">Confirmar nueva contraseña</label>
+                    <input id="PasswordConfirmar" name="PasswordConfirmar" type="password" required autocomplete="new-password"
+                           class="block w-full rounded-xl border-outline-variant text-sm py-2.5 focus:border-primary focus:ring-2 focus:ring-primary/20">
+                    <p id="matchText" class="mt-1 text-[11px] text-error hidden">Las contraseñas no coinciden.</p>
+                </div>
+
+                <div class="pt-2 flex items-center gap-3">
+                    <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-primary text-white px-5 py-2.5 text-sm font-bold shadow-md hover:bg-secondary active:scale-[.99] transition-all">
+                        <span class="material-symbols-outlined text-[18px]">check</span> Actualizar contraseña
+                    </button>
+                    @if (!Model.Obligatorio)
+                    {
+                        <a href="/" class="text-sm font-semibold text-on-surface-variant hover:text-primary">Cancelar</a>
+                    }
+                </div>
+            </form>
+        </section>
+    </div>
+</main>
+
+@section Scripts {
+<script>
+    (function () {
+        const n = document.getElementById('PasswordNueva'), c = document.getElementById('PasswordConfirmar');
+        const bar = document.getElementById('strengthBar'), txt = document.getElementById('strengthText'), m = document.getElementById('matchText');
+        function score(v) {
+            let s = 0;
+            if (v.length >= 8) s++; if (v.length >= 12) s++;
+            if (/[a-z]/.test(v) && /[A-Z]/.test(v)) s++;
+            if (/\d/.test(v)) s++; if (/[^A-Za-z0-9]/.test(v)) s++;
+            return s;
+        }
+        n.addEventListener('input', function () {
+            const s = score(n.value), lv = [['0%', '', ''], ['25%', '#ba1a1a', 'Muy débil'], ['45%', '#d97706', 'Débil'], ['65%', '#ca8a04', 'Aceptable'], ['85%', '#65a30d', 'Fuerte'], ['100%', '#16a34a', 'Excelente']][Math.min(s, 5)];
+            bar.style.width = lv[0]; bar.style.background = lv[1];
+            if (n.value) txt.textContent = 'Seguridad: ' + lv[2];
+        });
+        function chk() { m.classList.toggle('hidden', !c.value || c.value === n.value); }
+        c.addEventListener('input', chk); n.addEventListener('input', chk);
+    })();
+</script>
+}

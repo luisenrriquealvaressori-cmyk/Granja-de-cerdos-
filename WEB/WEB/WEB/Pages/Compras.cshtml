@@ -1,0 +1,1404 @@
+@page
+@model WEB.Pages.ComprasModel
+@{
+    ViewData["Title"] = "Compras, Proveedores & Catálogo - AgroPig Suite";
+}
+
+<div class="flex flex-col gap-6">
+    <!-- Header Section -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+        <div>
+            <div class="flex items-center gap-2 text-xs font-semibold text-primary uppercase tracking-wider mb-1">
+                <span class="material-symbols-outlined text-[16px]">shopping_cart</span>
+                <span>Abastecimiento &amp; Logística Agropecuaria</span>
+            </div>
+            <h1 class="text-2xl font-headline font-bold text-on-surface flex items-center gap-2.5">
+                <span>Catálogo de Productos &amp; Órdenes de Compra</span>
+                <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold">Bimonetario $ USD / C$ NIO</span>
+            </h1>
+            <p class="text-xs text-on-surface-variant mt-1">
+                Gestión comercial de proveedores, lista de precios mayoristas con reglas de descuento por volumen (porcentaje o monto fijo) y emisión de órdenes vinculadas a inventario.
+            </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2.5">
+            <button type="button" onclick="abrirModalNuevoProducto()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest text-xs font-bold transition-all border border-outline-variant shadow-xs">
+                <span class="material-symbols-outlined text-[16px]">add_box</span>
+                <span>+ Producto a Catálogo</span>
+            </button>
+            <button type="button" onclick="abrirModalNuevoProveedor()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest text-xs font-bold transition-all border border-outline-variant shadow-xs">
+                <span class="material-symbols-outlined text-[16px]">business</span>
+                <span>+ Nuevo Proveedor</span>
+            </button>
+            <a href="#seccion-nueva-orden" onclick="cambiarTab('nueva-orden')" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">receipt_long</span>
+                <span>Crear Orden de Compra</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Alert / Toast Messages -->
+    @if (!string.IsNullOrEmpty(Model.MensajeExito))
+    {
+        <div class="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2.5 shadow-xs">
+            <span class="material-symbols-outlined text-emerald-600 text-[20px]">check_circle</span>
+            <span>@Model.MensajeExito</span>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Model.MensajeError))
+    {
+        <div class="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-center gap-2.5 shadow-xs">
+            <span class="material-symbols-outlined text-red-600 text-[20px]">error</span>
+            <span>@Model.MensajeError</span>
+        </div>
+    }
+
+    <!-- KPI Summary Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- KPI 1: Inversión en Compras -->
+        <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant text-xs">
+                <span class="font-bold uppercase tracking-wider text-outline">Total en Órdenes</span>
+                <span class="material-symbols-outlined text-emerald-600">payments</span>
+            </div>
+            <div class="mt-2">
+                <div class="text-2xl font-bold font-headline text-emerald-800">
+                    $@Model.Data.TotalCompradoUsd.ToString("N2") <span class="text-xs font-normal text-on-surface-variant">USD</span>
+                </div>
+                <div class="text-xs font-semibold text-emerald-700 mt-0.5">
+                    C$ @Model.Data.TotalCompradoNio.ToString("N2") <span class="text-[10px] text-outline font-normal">(TC: @Model.Data.TasaCambioOficial)</span>
+                </div>
+            </div>
+            <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
+                <span>Órdenes emitidas activas</span>
+                <span class="font-bold text-on-surface">@Model.Data.OrdenesCompra.Count</span>
+            </div>
+        </div>
+
+        <!-- KPI 2: Proveedores Homologados -->
+        <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant text-xs">
+                <span class="font-bold uppercase tracking-wider text-outline">Proveedores Activos</span>
+                <span class="material-symbols-outlined text-primary">storefront</span>
+            </div>
+            <div class="mt-2">
+                <div class="text-2xl font-bold font-headline text-primary">
+                    @Model.Data.TotalProveedoresActivos <span class="text-xs font-normal text-on-surface-variant">empresas</span>
+                </div>
+                <div class="text-xs font-medium text-on-surface-variant mt-0.5">
+                    Nutrición, Salud y Equipamiento
+                </div>
+            </div>
+            <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
+                <span>RUC &amp; crédito verificado</span>
+                <span class="font-bold text-emerald-700">100% formal</span>
+            </div>
+        </div>
+
+        <!-- KPI 3: Catálogo de Insumos -->
+        <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant text-xs">
+                <span class="font-bold uppercase tracking-wider text-outline">Productos en Catálogo</span>
+                <span class="material-symbols-outlined text-amber-700">inventory_2</span>
+            </div>
+            <div class="mt-2">
+                <div class="text-2xl font-bold font-headline text-on-surface">
+                    @Model.Data.TotalProductosCatalogo <span class="text-xs font-normal text-on-surface-variant">artículos</span>
+                </div>
+                <div class="text-xs font-medium text-on-surface-variant mt-0.5">
+                    Alimentos, biológicos y ferretería
+                </div>
+            </div>
+            <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
+                <span>Con reglas de descuento</span>
+                <span class="font-bold text-primary">@Model.Data.ProductosCatalogo.Count(p => p.AplicaDescuento) artículos</span>
+            </div>
+        </div>
+
+        <!-- KPI 4: Órdenes Pendientes -->
+        <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between text-on-surface-variant text-xs">
+                <span class="font-bold uppercase tracking-wider text-outline">Pendientes de Recepción</span>
+                <span class="material-symbols-outlined text-blue-600">local_shipping</span>
+            </div>
+            <div class="mt-2">
+                <div class="text-2xl font-bold font-headline text-blue-800">
+                    @Model.Data.TotalOrdenesPendientes <span class="text-xs font-normal text-on-surface-variant">en tránsito</span>
+                </div>
+                <div class="text-xs font-medium text-on-surface-variant mt-0.5">
+                    Por ingresar formalmente a Kardex
+                </div>
+            </div>
+            <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
+                <span>Recepción en un clic</span>
+                <span class="font-bold text-blue-700">Auto-Kardex</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="flex border-b border-outline-variant gap-2 overflow-x-auto">
+        <button type="button" onclick="cambiarTab('catalogo')" id="tab-btn-catalogo" class="px-4 py-2.5 text-xs font-bold border-b-2 border-primary text-primary flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-[16px]">menu_book</span>
+            <span>Catálogo &amp; Precios Mayoristas</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-primary/10 text-primary text-[10px]">@Model.Data.ProductosCatalogo.Count</span>
+        </button>
+        <button type="button" onclick="cambiarTab('nueva-orden')" id="tab-btn-nueva-orden" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-[16px]">add_shopping_cart</span>
+            <span>Emitir Nueva Orden de Compra</span>
+        </button>
+        <button type="button" onclick="cambiarTab('ordenes')" id="tab-btn-ordenes" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-[16px]">receipt</span>
+            <span>Historial de Órdenes</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-surface-container-high text-on-surface text-[10px]">@Model.Data.OrdenesCompra.Count</span>
+        </button>
+        <button type="button" onclick="cambiarTab('proveedores')" id="tab-btn-proveedores" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-2 transition-all">
+            <span class="material-symbols-outlined text-[16px]">contacts</span>
+            <span>Directorio de Proveedores</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-surface-container-high text-on-surface text-[10px]">@Model.Data.Proveedores.Count</span>
+        </button>
+    </div>
+
+    <!-- TAB 1: CATÁLOGO DE PRODUCTOS & PRECIOS CON REGLAS DE DESCUENTO -->
+    <div id="tab-panel-catalogo" class="flex flex-col gap-4">
+        <!-- Information Box on Discount Rules -->
+        <div class="p-3.5 rounded-xl border border-primary/20 bg-primary-fixed/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            <div class="flex items-start gap-2.5">
+                <span class="material-symbols-outlined text-primary text-[20px] shrink-0 mt-0.5">percent</span>
+                <div>
+                    <span class="font-bold text-on-surface">Política de Descuentos por Volumen Configurable:</span>
+                    <p class="text-on-surface-variant mt-0.5">
+                        Cada producto puede tener un umbral de activación (ej. a partir de 10 sacos o 20 quintales). El descuento puede calcularse como <strong>porcentaje (%)</strong> sobre el precio o como <strong>rebaja monetaria fija ($ USD / C$ NIO)</strong> por unidad.
+                    </p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <span class="px-2.5 py-1 rounded-md bg-white border border-outline-variant font-bold text-primary text-[11px]">
+                    Tasa Oficial: C$ 36.80 = $1.00 USD
+                </span>
+            </div>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="p-3 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-outline uppercase tracking-wider">Filtrar por Proveedor:</span>
+                <select id="filtro-catalogo-proveedor" onchange="filtrarCatalogo()" class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-outline-variant bg-surface text-on-surface focus:ring-1 focus:ring-primary">
+                    <option value="">Todos los proveedores (@Model.Data.Proveedores.Count)</option>
+                    @foreach (var prv in Model.Data.Proveedores)
+                    {
+                        <option value="@prv.Id">@prv.NombreComercial</option>
+                    }
+                </select>
+            </div>
+            <div class="text-xs text-on-surface-variant">
+                Mostrando <strong id="contador-productos" class="text-primary font-bold">@Model.Data.ProductosCatalogo.Count</strong> productos homologados
+            </div>
+        </div>
+
+        <!-- Products Grid / Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="grid-productos-catalogo">
+            @foreach (var prod in Model.Data.ProductosCatalogo)
+            {
+                <div class="producto-card p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs hover:shadow-md transition-all flex flex-col justify-between" data-proveedor-id="@prod.ProveedorId">
+                    <div>
+                        <!-- Header & Supplier Badge -->
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant border border-outline-variant">
+                                    <span class="material-symbols-outlined text-[12px]">store</span>
+                                    @prod.ProveedorNombre
+                                </span>
+                                <div class="text-[11px] font-mono text-outline mt-1 font-semibold">@prod.CodigoProducto</div>
+                            </div>
+                            @if (prod.AplicaDescuento)
+                            {
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full @(prod.TipoDescuento == "porcentaje" ? "bg-purple-100 text-purple-800 border border-purple-300" : "bg-emerald-100 text-emerald-800 border border-emerald-300")">
+                                    <span class="material-symbols-outlined text-[11px]">local_offer</span>
+                                    @(prod.TipoDescuento == "porcentaje" ? $"{prod.DescuentoPorcentaje:0.#}% Dto." : $"-$ {prod.DescuentoMonetarioUsd:N2}")
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-surface-container text-outline">
+                                    Precio Neto
+                                </span>
+                            }
+                        </div>
+
+                        <!-- Product Title -->
+                        <h2 class="text-sm font-bold text-on-surface mt-2.5 leading-snug">@prod.NombreProducto</h2>
+                        <div class="text-xs text-on-surface-variant mt-0.5">Presentación: <strong>@prod.UnidadMedida</strong></div>
+
+                        <!-- Pricing Box -->
+                        <div class="mt-3 p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/60 flex items-center justify-between">
+                            <div>
+                                <div class="text-[10px] text-outline font-semibold uppercase">Precio Regular</div>
+                                <div class="text-base font-bold text-primary font-headline">$@prod.PrecioUnitarioUsd.ToString("N2") <span class="text-[10px] font-normal text-on-surface-variant">USD / @prod.UnidadMedida</span></div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-[10px] text-outline font-semibold uppercase">En Córdobas</div>
+                                <div class="text-xs font-bold text-on-surface">C$ @prod.PrecioUnitarioNio.ToString("N2")</div>
+                            </div>
+                        </div>
+
+                        <!-- Discount Rule Detail -->
+                        @if (prod.AplicaDescuento)
+                        {
+                            <div class="mt-2.5 p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-900 text-xs flex flex-col gap-1">
+                                <div class="flex items-center gap-1 font-bold text-[11px]">
+                                    <span class="material-symbols-outlined text-[14px] text-emerald-700">verified</span>
+                                    <span>Regla de Descuento por Volumen:</span>
+                                </div>
+                                <div class="text-[11px] leading-tight">
+                                    A partir de <strong>@prod.UnidadesMinimasDescuento @prod.UnidadMedida</strong>:
+                                    @if (prod.TipoDescuento == "porcentaje")
+                                    {
+                                        <span>aplica <strong>@prod.DescuentoPorcentaje:0.#% de descuento</strong> (Ahorro: $@(Math.Round(prod.PrecioUnitarioUsd * (prod.DescuentoPorcentaje / 100m), 2).ToString("N2")) USD / ud).</span>
+                                    }
+                                    else
+                                    {
+                                        <span>descuento monetario directo de <strong>$@prod.DescuentoMonetarioUsd.ToString("N2") USD</strong> (C$ @prod.DescuentoMonetarioNio.ToString("N2")) por unidad.</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(prod.NotasPromocion))
+                                {
+                                    <div class="text-[10px] text-emerald-700 italic">“@prod.NotasPromocion”</div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Action to add to purchase order -->
+                    <div class="mt-4 pt-3 border-t border-outline-variant/60 flex items-center justify-between">
+                        <span class="text-[11px] text-outline">Disponible para órdenes</span>
+                        <button type="button" onclick="agregarAOrdenDirecta('@prod.Id', '@prod.ProveedorId')" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white text-xs font-bold transition-all">
+                            <span class="material-symbols-outlined text-[14px]">add_shopping_cart</span>
+                            <span>Pedir Insumo</span>
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- TAB 2: EMITIR NUEVA ORDEN DE COMPRA (REACTIVA CON DESCUENTOS EN VIVO) -->
+    <div id="tab-panel-nueva-orden" class="hidden flex flex-col gap-5">
+        <div class="p-5 rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm flex flex-col gap-5">
+            <div>
+                <h2 class="text-base font-headline font-bold text-on-surface flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary">post_add</span>
+                    <span>Formulario de Emisión de Orden de Compra</span>
+                </h2>
+                <p class="text-xs text-on-surface-variant mt-0.5">
+                    Selecciona el proveedor y los productos. Ingresa las cantidades y el motor calculará en tiempo real si calificas para descuentos por volumen.
+                </p>
+            </div>
+
+            <!-- Header Parameters -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-surface-container-low border border-outline-variant/80">
+                <div>
+                    <label for="orden-proveedor-select" class="block text-xs font-bold text-on-surface mb-1">Proveedor Comercial *</label>
+                    <select id="orden-proveedor-select" onchange="alCambiarProveedorOrden()" class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary">
+                        <option value="">-- Seleccionar Proveedor --</option>
+                        @foreach (var prv in Model.Data.Proveedores)
+                        {
+                            <option value="@prv.Id" data-pago="@prv.CondicionesPago" data-contacto="@prv.ContactoNombre">@prv.NombreComercial (@prv.CondicionesPago)</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label for="orden-moneda-select" class="block text-xs font-bold text-on-surface mb-1">Moneda Principal</label>
+                    <select id="orden-moneda-select" class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary">
+                        <option value="USD" selected>Dólares Americanos ($ USD)</option>
+                        <option value="NIO">Córdobas Nicaragüenses (C$ NIO)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="orden-fecha-entrega" class="block text-xs font-bold text-on-surface mb-1">Fecha Entrega Esperada</label>
+                    <input id="orden-fecha-entrega" type="date" value="@DateTime.Today.AddDays(3).ToString("yyyy-MM-dd")" class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary" />
+                </div>
+            </div>
+
+            <!-- Line Items Table -->
+            <div class="flex flex-col gap-2">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-on-surface uppercase tracking-wider">Productos Seleccionados para la Orden</span>
+                    <span id="orden-proveedor-aviso" class="text-xs text-outline italic">Selecciona un proveedor arriba para cargar sus productos disponibles.</span>
+                </div>
+
+                <div class="overflow-x-auto rounded-xl border border-outline-variant">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-surface-container-high text-on-surface font-bold border-b border-outline-variant">
+                                <th class="p-3">Producto / Presentación</th>
+                                <th class="p-3 text-center">Precio Lista ($)</th>
+                                <th class="p-3 text-center">Regla de Descuento</th>
+                                <th class="p-3 text-center w-28">Cantidad</th>
+                                <th class="p-3 text-right">Subtotal ($)</th>
+                                <th class="p-3 text-right">Descuento ($)</th>
+                                <th class="p-3 text-right">Total Neto ($)</th>
+                                <th class="p-3 text-center w-12">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orden-lineas-tbody">
+                            <tr id="orden-empty-row">
+                                <td colspan="8" class="p-8 text-center text-on-surface-variant">
+                                    <span class="material-symbols-outlined text-[36px] text-outline block mb-1">add_shopping_cart</span>
+                                    <span>No hay productos agregados a la orden. Selecciona un proveedor y pulsa "Agregar Producto".</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="flex items-center justify-between pt-2">
+                    <button type="button" id="btn-agregar-linea" onclick="abrirSelectorProductoParaOrden()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-primary font-bold text-xs border border-outline-variant transition-all">
+                        <span class="material-symbols-outlined text-[16px]">add</span>
+                        <span>+ Agregar Producto de Proveedor</span>
+                    </button>
+                    <div class="text-xs text-outline italic">
+                        Los descuentos se aplican automáticamente al alcanzar las unidades mínimas exigidas por el proveedor.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Observations & Financial Summary Box -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-outline-variant">
+                <div class="md:col-span-2">
+                    <label for="orden-observaciones" class="block text-xs font-bold text-on-surface mb-1">Observaciones / Instrucciones de Entrega</label>
+                    <textarea id="orden-observaciones" rows="3" placeholder="Ej: Entregar en Galpón 1, descargar en plataforma de tolvas. Horario de recepción: 08:00 a 12:00." class="w-full text-xs px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary"></textarea>
+                </div>
+
+                <!-- Financial calculation panel -->
+                <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant flex flex-col gap-2">
+                    <div class="flex items-center justify-between text-xs text-on-surface-variant">
+                        <span>Subtotal Bruto:</span>
+                        <span id="resumen-subtotal-usd" class="font-bold text-on-surface">$ 0.00 USD</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs text-emerald-700">
+                        <span class="flex items-center gap-1">
+                            <span class="material-symbols-outlined text-[14px]">local_offer</span>
+                            Descuento por Volumen:
+                        </span>
+                        <span id="resumen-descuento-usd" class="font-bold">-$ 0.00 USD</span>
+                    </div>
+                    <div class="pt-2 border-t border-outline-variant/80 flex items-center justify-between">
+                        <span class="text-xs font-bold text-on-surface">TOTAL ORDEN:</span>
+                        <div class="text-right">
+                            <div id="resumen-total-usd" class="text-lg font-headline font-bold text-primary">$ 0.00 USD</div>
+                            <div id="resumen-total-nio" class="text-xs font-bold text-on-surface-variant">C$ 0.00 NIO</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-2">
+                        <button type="button" id="btn-emitir-orden-submit" onclick="enviarOrdenCompra()" class="w-full py-2.5 px-4 rounded-xl bg-primary text-on-primary hover:bg-primary/90 font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all">
+                            <span class="material-symbols-outlined text-[16px]">send</span>
+                            <span>Emitir Orden de Compra</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: HISTORIAL DE ÓRDENES DE COMPRA -->
+    <div id="tab-panel-ordenes" class="hidden flex flex-col gap-4">
+        @if (!Model.Data.OrdenesCompra.Any())
+        {
+            <div class="p-12 text-center rounded-2xl border border-outline-variant bg-surface-container-lowest text-on-surface-variant">
+                <span class="material-symbols-outlined text-[48px] text-outline mb-2">receipt_long</span>
+                <p class="font-bold text-base text-on-surface">No se han emitido órdenes de compra aún.</p>
+                <p class="text-xs text-outline mt-1">Usa la pestaña "Emitir Nueva Orden de Compra" para generar la primera.</p>
+            </div>
+        }
+        else
+        {
+            <div class="overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead>
+                        <tr class="bg-surface-container-high text-on-surface font-bold border-b border-outline-variant">
+                            <th class="p-3">N° Orden</th>
+                            <th class="p-3">Proveedor</th>
+                            <th class="p-3">Fecha Emisión</th>
+                            <th class="p-3">Estado</th>
+                            <th class="p-3 text-right">Subtotal</th>
+                            <th class="p-3 text-right">Descuento</th>
+                            <th class="p-3 text-right">Total ($ USD)</th>
+                            <th class="p-3 text-right">Total (C$ NIO)</th>
+                            <th class="p-3 text-center">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-outline-variant/60">
+                        @foreach (var ord in Model.Data.OrdenesCompra)
+                        {
+                            <tr class="hover:bg-surface-container-low/50 transition-colors">
+                                <td class="p-3 font-mono font-bold text-primary">
+                                    @ord.NumeroOrden
+                                    <div class="text-[10px] text-outline font-normal">@ord.CantidadItems ítems</div>
+                                </td>
+                                <td class="p-3 font-semibold text-on-surface">
+                                    @ord.ProveedorNombre
+                                    @if (!string.IsNullOrWhiteSpace(ord.Observaciones))
+                                    {
+                                        <div class="text-[10px] text-on-surface-variant truncate max-w-xs">@ord.Observaciones</div>
+                                    }
+                                </td>
+                                <td class="p-3 text-on-surface-variant">
+                                    @ord.FechaEmision.ToString("dd/MM/yyyy")
+                                    @if (ord.FechaEntregaEsperada.HasValue)
+                                    {
+                                        <div class="text-[10px] text-outline">Entr.: @ord.FechaEntregaEsperada.Value.ToString("dd/MM/yyyy")</div>
+                                    }
+                                </td>
+                                <td class="p-3">
+                                    <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border @ord.EstadoBadgeClass">
+                                        <span class="material-symbols-outlined text-[12px]">@(ord.Estado == "recibida_kardex" ? "check_circle" : "local_shipping")</span>
+                                        @ord.EstadoTexto
+                                    </span>
+                                    @if (ord.Estado == "recibida_kardex" && !string.IsNullOrWhiteSpace(ord.LoteFabricante))
+                                    {
+                                        <div class="mt-1 text-[10px] text-emerald-800 font-semibold flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[12px]">verified</span>
+                                            <span>Lote: @ord.LoteFabricante</span>
+                                            @if (ord.FechaVencimiento.HasValue)
+                                            {
+                                                <span>(Vence: @ord.FechaVencimiento.Value.ToString("dd/MM/yy"))</span>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                                <td class="p-3 text-right font-medium text-on-surface-variant">$@ord.SubtotalUsd.ToString("N2")</td>
+                                <td class="p-3 text-right font-bold text-emerald-700">
+                                    @(ord.DescuentoUsd > 0 ? $"-${ord.DescuentoUsd:N2}" : "$0.00")
+                                </td>
+                                <td class="p-3 text-right font-bold font-headline text-on-surface">$@ord.TotalUsd.ToString("N2")</td>
+                                <td class="p-3 text-right font-bold text-primary">C$ @ord.TotalNio.ToString("N2")</td>
+                                <td class="p-3 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        <button type="button" onclick="abrirModalImprimirOrden('@ord.Id')" class="px-2 py-1 rounded bg-surface-container hover:bg-surface-container-high text-primary font-bold text-[11px] border border-outline-variant flex items-center gap-1" title="Ver proforma, imprimir PDF o enviar por WhatsApp">
+                                            <span class="material-symbols-outlined text-[13px]">print</span>
+                                            <span>Factura / PDF</span>
+                                        </button>
+                                        @if (ord.Estado != "recibida_kardex")
+                                        {
+                                            <button type="button" onclick="abrirModalRecibirKardex('@ord.Id', '@ord.NumeroOrden')" class="px-2.5 py-1 rounded bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold flex items-center gap-1 shadow-xs" title="Ingresar físicamente con Lote y Vencimiento a Kardex">
+                                                <span class="material-symbols-outlined text-[13px]">inventory_2</span>
+                                                <span>Recibir Kardex</span>
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- TAB 4: DIRECTORIO DE PROVEEDORES -->
+    <div id="tab-panel-proveedores" class="hidden flex flex-col gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            @foreach (var prv in Model.Data.Proveedores)
+            {
+                <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-start justify-between">
+                            <span class="text-xs font-mono font-bold text-outline">@prv.Codigo</span>
+                            <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                @prv.CondicionesPago
+                            </span>
+                        </div>
+                        <h2 class="text-base font-bold text-on-surface mt-2">@prv.NombreComercial</h2>
+                        @if (!string.IsNullOrWhiteSpace(prv.RazonSocial))
+                        {
+                            <div class="text-xs text-on-surface-variant font-medium">@prv.RazonSocial</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(prv.Ruc))
+                        {
+                            <div class="text-[11px] text-outline mt-0.5">RUC: @prv.Ruc</div>
+                        }
+
+                        <div class="mt-3 pt-3 border-t border-outline-variant/60 flex flex-col gap-1.5 text-xs text-on-surface-variant">
+                            @if (!string.IsNullOrWhiteSpace(prv.ContactoNombre))
+                            {
+                                <div class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[15px] text-outline">person</span>
+                                    <span>Contacto: <strong class="text-on-surface">@prv.ContactoNombre</strong></span>
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(prv.Telefono))
+                            {
+                                <div class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[15px] text-outline">phone</span>
+                                    <span>@prv.Telefono</span>
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(prv.Email))
+                            {
+                                <div class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[15px] text-outline">mail</span>
+                                    <span>@prv.Email</span>
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(prv.Direccion))
+                            {
+                                <div class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[15px] text-outline">pin_drop</span>
+                                    <span class="truncate">@prv.Direccion</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-outline-variant/60 flex items-center justify-between text-xs">
+                        <span class="text-outline font-semibold">@prv.TotalProductosOfrecidos productos en catálogo</span>
+                        <button type="button" onclick="filtrarCatalogoPorProveedorYVer('@prv.Id')" class="text-primary hover:underline font-bold flex items-center gap-1">
+                            <span>Ver Insumos</span>
+                            <span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODALES: NUEVO PROVEEDOR, NUEVO PRODUCTO Y DETALLE DE ORDEN -->
+<!-- ========================================================================= -->
+
+<!-- Modal: Nuevo Proveedor -->
+<div id="modal-nuevo-proveedor" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-lg w-full p-6 shadow-xl flex flex-col gap-4">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3">
+            <h2 class="text-base font-bold font-headline text-on-surface flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary">add_business</span>
+                <span>Registrar Nuevo Proveedor</span>
+            </h2>
+            <button type="button" onclick="cerrarModalNuevoProveedor()" class="text-outline hover:text-on-surface">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+        <form method="post" asp-page-handler="GuardarProveedor" class="flex flex-col gap-3 text-xs">
+            <div>
+                <label class="block font-bold text-on-surface mb-1">Nombre Comercial *</label>
+                <input type="text" name="NombreComercial" required placeholder="Ej: Nutrición Animal S.A." class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Razón Social</label>
+                    <input type="text" name="RazonSocial" placeholder="Nombre legal" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+                </div>
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">RUC</label>
+                    <input type="text" name="Ruc" placeholder="J031000000000" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Contacto Principal</label>
+                    <input type="text" name="ContactoNombre" placeholder="Ing. o Lic. encargado" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+                </div>
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Teléfono</label>
+                    <input type="text" name="Telefono" placeholder="+505 8888-0000" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Correo Electrónico</label>
+                    <input type="email" name="Email" placeholder="ventas@proveedor.com" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+                </div>
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Condiciones de Pago</label>
+                    <select name="CondicionesPago" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold">
+                        <option value="Contado">Contado</option>
+                        <option value="Crédito 15 días">Crédito 15 días</option>
+                        <option value="Crédito 30 días">Crédito 30 días</option>
+                        <option value="Crédito 45 días">Crédito 45 días</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block font-bold text-on-surface mb-1">Dirección Física</label>
+                <input type="text" name="Direccion" placeholder="Dirección o Km carretera" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+            </div>
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-outline-variant">
+                <button type="button" onclick="cerrarModalNuevoProveedor()" class="px-3 py-2 rounded-lg border border-outline-variant font-bold text-on-surface hover:bg-surface-container">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-on-primary font-bold hover:bg-primary/90">Guardar Proveedor</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Nuevo Producto al Catálogo con Reglas de Descuento -->
+<div id="modal-nuevo-producto" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-lg w-full p-6 shadow-xl flex flex-col gap-4">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3">
+            <h2 class="text-base font-bold font-headline text-on-surface flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary">add_box</span>
+                <span>Agregar Producto &amp; Regla de Descuento</span>
+            </h2>
+            <button type="button" onclick="cerrarModalNuevoProducto()" class="text-outline hover:text-on-surface">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+        <form method="post" asp-page-handler="GuardarProducto" class="flex flex-col gap-3 text-xs">
+            <div>
+                <label class="block font-bold text-on-surface mb-1">Proveedor Distribuidor *</label>
+                <select name="ProveedorId" required class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold">
+                    <option value="">-- Seleccionar --</option>
+                    @foreach (var prv in Model.Data.Proveedores)
+                    {
+                        <option value="@prv.Id">@prv.NombreComercial</option>
+                    }
+                </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Código / SKU</label>
+                    <input type="text" name="CodigoProducto" placeholder="ALIM-ENG-02" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface" />
+                </div>
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Unidad de Medida *</label>
+                    <input type="text" name="UnidadMedida" value="qq (100 lbs)" required class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold" />
+                </div>
+            </div>
+            <div>
+                <label class="block font-bold text-on-surface mb-1">Nombre Comercial del Producto *</label>
+                <input type="text" name="NombreProducto" required placeholder="Ej: Concentrado Cerdas Gestantes Fibra Alta" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold" />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Precio Unitario ($ USD) *</label>
+                    <input type="number" step="0.01" min="0.01" name="PrecioUnitarioUsd" id="modal-precio-usd" oninput="sincronizarModalPrecios('usd')" required placeholder="32.50" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-bold text-primary" />
+                </div>
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Precio Unitario (C$ NIO)</label>
+                    <input type="number" step="0.01" min="0.01" name="PrecioUnitarioNio" id="modal-precio-nio" oninput="sincronizarModalPrecios('nio')" placeholder="1196.00" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-bold" />
+                </div>
+            </div>
+
+            <!-- Sección de Descuento por Volumen -->
+            <div class="p-3.5 rounded-xl border border-primary/30 bg-primary-fixed/15 flex flex-col gap-2.5">
+                <div class="flex items-center justify-between">
+                    <label class="flex items-center gap-2 cursor-pointer font-bold text-on-surface">
+                        <input type="checkbox" name="AplicaDescuento" id="chk-aplica-descuento" value="true" onchange="toggleSeccionDescuentoModal()" class="w-4 h-4 rounded text-primary border-outline-variant" />
+                        <span>¿Aplica descuento por volumen o compras al mayor?</span>
+                    </label>
+                </div>
+
+                <div id="seccion-descuento-inputs" class="hidden flex flex-col gap-2.5 pt-2 border-t border-primary/20">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-bold text-on-surface mb-1">A partir de cuántas unidades:</label>
+                            <input type="number" name="UnidadesMinimasDescuento" value="10" min="1" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface font-bold" />
+                        </div>
+                        <div>
+                            <label class="block font-bold text-on-surface mb-1">Tipo de Descuento:</label>
+                            <select name="TipoDescuento" id="modal-tipo-descuento" onchange="actualizarTipoDescuentoModal()" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface font-bold">
+                                <option value="porcentaje">Porcentaje (%)</option>
+                                <option value="monetario">Monto Fijo ($ / C$)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="campo-dto-porcentaje" class="grid grid-cols-1 gap-2">
+                        <label class="block font-bold text-on-surface mb-0.5">Porcentaje de Descuento (%):</label>
+                        <input type="number" step="0.1" min="0" max="100" name="DescuentoPorcentaje" value="8.0" placeholder="Ej: 8.0%" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface font-bold text-purple-700" />
+                    </div>
+
+                    <div id="campo-dto-monetario" class="hidden grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-bold text-on-surface mb-0.5">Rebaja por unidad ($ USD):</label>
+                            <input type="number" step="0.01" min="0" name="DescuentoMonetarioUsd" value="0.00" placeholder="2.50" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface font-bold text-emerald-700" />
+                        </div>
+                        <div>
+                            <label class="block font-bold text-on-surface mb-0.5">Rebaja por unidad (C$ NIO):</label>
+                            <input type="number" step="0.01" min="0" name="DescuentoMonetarioNio" value="0.00" placeholder="92.00" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface font-bold text-emerald-700" />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-on-surface mb-0.5">Nota o condición de la promoción:</label>
+                        <input type="text" name="NotasPromocion" placeholder="Ej: 8% de descuento por compra de 20 quintales o más" class="w-full px-3 py-1.5 rounded-lg border border-outline-variant bg-white text-on-surface" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-outline-variant">
+                <button type="button" onclick="cerrarModalNuevoProducto()" class="px-3 py-2 rounded-lg border border-outline-variant font-bold text-on-surface hover:bg-surface-container">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-on-primary font-bold hover:bg-primary/90">Guardar en Catálogo</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+@@media print {
+    body * {
+        visibility: hidden !important;
+    }
+    #modal-imprimir-orden, #modal-imprimir-orden * {
+        visibility: visible !important;
+    }
+    #seccion-factura-imprimible, #seccion-factura-imprimible * {
+        visibility: visible !important;
+    }
+    #modal-imprimir-orden {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: white !important;
+        display: block !important;
+        box-shadow: none !important;
+    }
+    #seccion-factura-imprimible {
+        width: 100% !important;
+        border: none !important;
+        padding: 10px !important;
+    }
+    .no-print {
+        display: none !important;
+    }
+}
+</style>
+
+<!-- Modal: Recepción Física en Kardex con Trazabilidad (Lote, Vencimiento, Bodega) -->
+<div id="modal-recibir-kardex" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-md w-full p-6 shadow-xl flex flex-col gap-4">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3">
+            <h2 class="text-base font-bold font-headline text-on-surface flex items-center gap-2">
+                <span class="material-symbols-outlined text-emerald-700">inventory_2</span>
+                <span>Recepción Física de Insumos</span>
+            </h2>
+            <button type="button" onclick="cerrarModalRecibirKardex()" class="text-outline hover:text-on-surface">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+        <form method="post" asp-page-handler="RecibirKardex" class="flex flex-col gap-3 text-xs">
+            <input type="hidden" name="ordenId" id="recibir-orden-id" />
+            <div class="p-2.5 rounded-lg bg-surface-container border border-outline-variant">
+                <span class="text-[11px] text-outline block">Orden a recepcionar:</span>
+                <span id="recibir-orden-numero" class="font-mono font-bold text-primary text-sm">OC-2026-XXXX</span>
+            </div>
+            <div>
+                <label class="block font-bold text-on-surface mb-1">Número de Lote del Fabricante *</label>
+                <input type="text" name="loteFabricante" required placeholder="Ej: LOT-CARGILL-2026-88" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold" />
+                <span class="text-[10px] text-outline mt-0.5 block">Para control de calidad sanitario y trazabilidad en granja.</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Fecha de Vencimiento</label>
+                    <input type="date" name="fechaVencimiento" value="@DateTime.Today.AddMonths(12).ToString("yyyy-MM-dd")" class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold" />
+                </div>
+                <div>
+                    <label class="block font-bold text-on-surface mb-1">Bodega / Silo Destino *</label>
+                    <select name="bodegaDestino" required class="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-on-surface font-semibold">
+                        <option value="Silo Alimento N° 1 - Gestación">Silo N° 1 - Gestación</option>
+                        <option value="Silo Alimento N° 2 - Engorde">Silo N° 2 - Engorde</option>
+                        <option value="Bodega Central de Insumos">Bodega Central Insumos</option>
+                        <option value="Farmacia Veterinaria Maternidad">Farmacia Veterinaria</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-outline-variant">
+                <button type="button" onclick="cerrarModalRecibirKardex()" class="px-3 py-2 rounded-lg border border-outline-variant font-bold text-on-surface hover:bg-surface-container">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-700 text-white font-bold hover:bg-emerald-800 flex items-center gap-1.5 shadow-sm">
+                    <span class="material-symbols-outlined text-[16px]">check_circle</span>
+                    <span>Confirmar Ingreso a Kardex</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Vista Previa, Impresión PDF y WhatsApp de Orden de Compra -->
+<div id="modal-imprimir-orden" class="fixed inset-0 bg-black/60 z-50 items-center justify-center p-4 overflow-y-auto" style="display: none;">
+    <div class="bg-white border border-outline-variant rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto my-auto">
+        <!-- Barra de Herramientas Superior -->
+        <div class="flex items-center justify-between pb-3 border-b border-outline-variant no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[24px]">receipt_long</span>
+                <span class="font-headline font-bold text-base text-on-surface">Comprobante Oficial de Orden de Compra</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button type="button" onclick="imprimirOrdenActual()" class="px-3 py-1.5 rounded-lg bg-primary text-on-primary font-bold text-xs flex items-center gap-1.5 shadow-xs hover:bg-primary/90">
+                    <span class="material-symbols-outlined text-[16px]">print</span>
+                    <span>Imprimir / Guardar PDF</span>
+                </button>
+                <button type="button" onclick="enviarOrdenPorWhatsApp()" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs hover:bg-emerald-700">
+                    <span class="material-symbols-outlined text-[16px]">chat</span>
+                    <span>Enviar WhatsApp</span>
+                </button>
+                <button type="button" onclick="cerrarModalImprimirOrden()" class="text-outline hover:text-on-surface p-1">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- DOCUMENTO FACTURA / ORDEN LIMPIO IMPRIMIBLE -->
+        <div id="seccion-factura-imprimible" class="p-6 border border-gray-200 rounded-xl bg-white text-gray-900 flex flex-col gap-5 text-xs">
+            <!-- Encabezado de Empresa -->
+            <div class="flex items-start justify-between border-b pb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-800 text-white flex items-center justify-center font-bold text-2xl">
+                        🐷
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-bold tracking-tight text-gray-900">AGROPIG SUITE - GRANJA SAN JERÓNIMO</h1>
+                        <p class="text-[11px] text-gray-500">Producción Porcina Intensiva &amp; Bioseguridad de Precisión</p>
+                        <p class="text-[10px] text-gray-500">RUC: J0310000004521 | Tel: +505 8888-0000 | Km 45 Panamericana Norte, Nicaragua</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs uppercase font-bold text-gray-400 block">ORDEN DE COMPRA OFICIAL</span>
+                    <span id="factura-numero-orden" class="text-base font-mono font-bold text-emerald-800">OC-2026-0001</span>
+                    <span id="factura-fecha-emision" class="text-[11px] text-gray-600 block mt-0.5">Fecha: 14/10/2026</span>
+                    <span id="factura-badge-estado" class="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">Emitida</span>
+                </div>
+            </div>
+
+            <!-- Datos del Proveedor y Entrega -->
+            <div class="grid grid-cols-2 gap-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div>
+                    <span class="font-bold text-gray-700 block uppercase text-[10px] tracking-wider mb-1">PROVEEDOR EMISOR:</span>
+                    <div id="factura-proveedor-nombre" class="font-bold text-sm text-gray-900">Cargill Nutrición Porcina</div>
+                    <div id="factura-proveedor-contacto" class="text-gray-600 mt-0.5">Contacto: Ing. Comercial</div>
+                    <div id="factura-proveedor-condiciones" class="text-gray-600">Condición: Crédito 30 días</div>
+                </div>
+                <div class="text-right">
+                    <span class="font-bold text-gray-700 block uppercase text-[10px] tracking-wider mb-1">DESTINO &amp; RECEPCIÓN:</span>
+                    <div>Granja San Jerónimo - Muelle de Almacén</div>
+                    <div id="factura-fecha-entrega" class="text-gray-600">Entrega Estimada: Inmediata</div>
+                    <div id="factura-solicitado-por" class="text-gray-600">Solicitado por: Luis (Admin)</div>
+                </div>
+            </div>
+
+            <!-- Tabla de Ítems Comprados con Descuentos -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b-2 border-gray-300 text-gray-700 font-bold text-[11px]">
+                            <th class="py-2">Descripción del Insumo</th>
+                            <th class="py-2 text-center">Unidad</th>
+                            <th class="py-2 text-right">Cantidad</th>
+                            <th class="py-2 text-right">Precio Unit. ($)</th>
+                            <th class="py-2 text-right">Dto. Volumen</th>
+                            <th class="py-2 text-right">Subtotal ($)</th>
+                            <th class="py-2 text-right">Total ($ USD)</th>
+                            <th class="py-2 text-right">Total (C$ NIO)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="factura-items-tbody" class="divide-y divide-gray-200">
+                        <!-- Generado dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Resumen Financiero y Totales Bimonetarios -->
+            <div class="flex justify-between items-start pt-3 border-t border-gray-200">
+                <div class="max-w-xs text-gray-600 text-[11px]">
+                    <span class="font-bold text-gray-800 block mb-1">Observaciones / Instrucciones:</span>
+                    <p id="factura-observaciones" class="italic text-gray-500">Ninguna especificada.</p>
+                    <div class="mt-3 text-[10px] text-gray-400">
+                        * Tasa oficial aplicada: C$ 36.80 NIO por 1 USD. Los descuentos se aplican según la escala acordada con el proveedor.
+                    </div>
+                </div>
+
+                <div class="w-64 flex flex-col gap-1.5 p-3 rounded-lg bg-gray-50 border border-gray-200 text-right">
+                    <div class="flex justify-between text-gray-600">
+                        <span>Subtotal Bruto:</span>
+                        <span id="factura-subtotal-usd" class="font-semibold">$0.00</span>
+                    </div>
+                    <div class="flex justify-between text-emerald-700 font-semibold">
+                        <span>Descuento Volumen:</span>
+                        <span id="factura-descuento-usd">-$0.00</span>
+                    </div>
+                    <div class="pt-2 border-t border-gray-300 flex justify-between items-baseline">
+                        <span class="font-bold text-gray-900 text-xs">TOTAL NETO (USD):</span>
+                        <span id="factura-total-usd" class="text-base font-bold text-emerald-800">$0.00 USD</span>
+                    </div>
+                    <div class="flex justify-between items-baseline text-gray-700">
+                        <span class="font-bold text-xs">TOTAL (C$ NIO):</span>
+                        <span id="factura-total-nio" class="font-bold text-sm text-gray-900">C$ 0.00 NIO</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Firmas de Autorización -->
+            <div class="grid grid-cols-3 gap-6 pt-10 mt-6 border-t border-gray-300 text-center text-[10px] text-gray-500">
+                <div class="border-t border-gray-400 pt-1">
+                    <span class="font-bold text-gray-700 block">Elaborado Por</span>
+                    <span id="factura-firma-elaborado">Luis (Admin)</span>
+                </div>
+                <div class="border-t border-gray-400 pt-1">
+                    <span class="font-bold text-gray-700 block">Aprobado Gerencia</span>
+                    <span>Gerencia General AgroPig</span>
+                </div>
+                <div class="border-t border-gray-400 pt-1">
+                    <span class="font-bold text-gray-700 block">Recibido Conforme</span>
+                    <span id="factura-firma-proveedor">Representante Proveedor</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts interactivos de Catálogo y Órdenes -->
+<script>
+    const CATALOGO_JSON = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Data.ProductosCatalogo));
+    const ORDENES_JSON = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Data.OrdenesCompra));
+    const PROVEEDORES_JSON = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Data.Proveedores));
+    const TASA_CAMBIO = 36.80;
+
+    let lineasOrden = [];
+    let ordenActualFactura = null;
+
+    function cambiarTab(tab) {
+        ['catalogo', 'nueva-orden', 'ordenes', 'proveedores'].forEach(t => {
+            const panel = document.getElementById('tab-panel-' + t);
+            const btn = document.getElementById('tab-btn-' + t);
+            if (panel) panel.classList.toggle('hidden', t !== tab);
+            if (btn) {
+                if (t === tab) {
+                    btn.classList.add('border-primary', 'text-primary');
+                    btn.classList.remove('border-transparent', 'text-on-surface-variant');
+                } else {
+                    btn.classList.remove('border-primary', 'text-primary');
+                    btn.classList.add('border-transparent', 'text-on-surface-variant');
+                }
+            }
+        });
+    }
+
+    function filtrarCatalogo() {
+        const provId = document.getElementById('filtro-catalogo-proveedor').value;
+        const cards = document.querySelectorAll('.producto-card');
+        let visibles = 0;
+        cards.forEach(c => {
+            const match = !provId || c.getAttribute('data-proveedor-id') === provId;
+            c.style.display = match ? 'flex' : 'none';
+            if (match) visibles++;
+        });
+        document.getElementById('contador-productos').textContent = visibles;
+    }
+
+    function filtrarCatalogoPorProveedorYVer(provId) {
+        document.getElementById('filtro-catalogo-proveedor').value = provId;
+        filtrarCatalogo();
+        cambiarTab('catalogo');
+    }
+
+    function alCambiarProveedorOrden() {
+        const provId = document.getElementById('orden-proveedor-select').value;
+        const aviso = document.getElementById('orden-proveedor-aviso');
+        if (provId) {
+            const sel = document.getElementById('orden-proveedor-select');
+            const texto = sel.options[sel.selectedIndex].text;
+            aviso.textContent = 'Proveedor seleccionado: ' + texto;
+            aviso.className = 'text-xs text-primary font-bold';
+        } else {
+            aviso.textContent = 'Selecciona un proveedor arriba para cargar sus productos disponibles.';
+            aviso.className = 'text-xs text-outline italic';
+        }
+        // Limpiar líneas si cambió de proveedor
+        lineasOrden = [];
+        renderizarLineasOrden();
+    }
+
+    function abrirSelectorProductoParaOrden() {
+        const provId = document.getElementById('orden-proveedor-select').value;
+        if (!provId) {
+            alert('Por favor selecciona primero un proveedor en la parte superior.');
+            document.getElementById('orden-proveedor-select').focus();
+            return;
+        }
+
+        const prodsProveedor = CATALOGO_JSON.filter(p => p.ProveedorId === provId);
+        if (prodsProveedor.length === 0) {
+            alert('Este proveedor no tiene productos registrados en el catálogo aún.');
+            return;
+        }
+
+        // Agregar el primer producto disponible que no esté ya en la lista
+        const yaAgregados = new Set(lineasOrden.map(l => l.ProductoCatalogoId));
+        const disponible = prodsProveedor.find(p => !yaAgregados.has(p.Id)) || prodsProveedor[0];
+
+        lineasOrden.push({
+            ProductoCatalogoId: disponible.Id,
+            Cantidad: disponible.UnidadesMinimasDescuento || 10
+        });
+
+        renderizarLineasOrden();
+    }
+
+    function agregarAOrdenDirecta(prodId, provId) {
+        document.getElementById('orden-proveedor-select').value = provId;
+        alCambiarProveedorOrden();
+        const prod = CATALOGO_JSON.find(p => p.Id === prodId);
+        lineasOrden = [{
+            ProductoCatalogoId: prodId,
+            Cantidad: prod ? (prod.UnidadesMinimasDescuento || 10) : 10
+        }];
+        renderizarLineasOrden();
+        cambiarTab('nueva-orden');
+        window.scrollTo({ top: 300, behavior: 'smooth' });
+    }
+
+    function renderizarLineasOrden() {
+        const tbody = document.getElementById('orden-lineas-tbody');
+        const provId = document.getElementById('orden-proveedor-select').value;
+        const prodsProveedor = CATALOGO_JSON.filter(p => p.ProveedorId === provId);
+
+        if (lineasOrden.length === 0) {
+            tbody.innerHTML = `
+                <tr id="orden-empty-row">
+                    <td colspan="8" class="p-8 text-center text-on-surface-variant">
+                        <span class="material-symbols-outlined text-[36px] text-outline block mb-1">add_shopping_cart</span>
+                        <span>No hay productos agregados a la orden. Selecciona un proveedor y pulsa "Agregar Producto".</span>
+                    </td>
+                </tr>`;
+            actualizarTotalesOrden();
+            return;
+        }
+
+        let html = '';
+        lineasOrden.forEach((linea, index) => {
+            const prod = CATALOGO_JSON.find(p => p.Id === linea.ProductoCatalogoId) || prodsProveedor[0];
+            if (!prod) return;
+
+            // Calcular cálculos reactivos
+            const cant = Number(linea.Cantidad) || 0;
+            const subtotal = cant * prod.PrecioUnitarioUsd;
+            let descuentoUnit = 0;
+            let aplicoDesc = false;
+
+            if (prod.AplicaDescuento && cant >= prod.UnidadesMinimasDescuento) {
+                aplicoDesc = true;
+                if (prod.TipoDescuento === 'porcentaje') {
+                    descuentoUnit = prod.PrecioUnitarioUsd * (prod.DescuentoPorcentaje / 100);
+                } else {
+                    descuentoUnit = prod.DescuentoMonetarioUsd > 0 ? prod.DescuentoMonetarioUsd : (prod.DescuentoMonetarioNio / TASA_CAMBIO);
+                }
+            }
+
+            const descuentoLinea = cant * descuentoUnit;
+            const totalLinea = Math.max(0, subtotal - descuentoLinea);
+
+            // Opciones de productos del proveedor
+            let optionsHtml = '';
+            prodsProveedor.forEach(p => {
+                const sel = p.Id === linea.ProductoCatalogoId ? 'selected' : '';
+                optionsHtml += `<option value="${p.Id}" ${sel}>${p.NombreProducto} (${p.UnidadMedida})</option>`;
+            });
+
+            html += `
+                <tr class="border-b border-outline-variant/60 hover:bg-surface-container-low/40 transition-colors">
+                    <td class="p-3">
+                        <select onchange="cambiarProductoLinea(${index}, this.value)" class="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-outline-variant bg-white text-on-surface">
+                            ${optionsHtml}
+                        </select>
+                        <div class="text-[11px] text-outline mt-0.5">${prod.UnidadMedida}</div>
+                    </td>
+                    <td class="p-3 text-center font-bold text-on-surface font-headline">
+                        $${prod.PrecioUnitarioUsd.toFixed(2)}
+                    </td>
+                    <td class="p-3 text-center">
+                        ${prod.AplicaDescuento 
+                            ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md ${aplicoDesc ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-surface-container text-outline'}">
+                                ${prod.TipoDescuento === 'porcentaje' ? `${prod.DescuentoPorcentaje}% dto.` : `-$${prod.DescuentoMonetarioUsd.toFixed(2)}`} (min ${prod.UnidadesMinimasDescuento} uds)
+                               </span>`
+                            : `<span class="text-[10px] text-outline">Sin dto.</span>`
+                        }
+                    </td>
+                    <td class="p-3 text-center">
+                        <input type="number" min="1" value="${cant}" oninput="cambiarCantidadLinea(${index}, this.value)" class="w-20 text-center font-bold text-xs px-2 py-1 rounded border border-outline-variant bg-white text-on-surface focus:ring-1 focus:ring-primary" />
+                    </td>
+                    <td class="p-3 text-right font-medium text-on-surface-variant">
+                        $${subtotal.toFixed(2)}
+                    </td>
+                    <td class="p-3 text-right font-bold ${aplicoDesc ? 'text-emerald-700' : 'text-outline'}">
+                        ${aplicoDesc ? `-$${descuentoLinea.toFixed(2)}` : '$0.00'}
+                    </td>
+                    <td class="p-3 text-right font-bold text-primary font-headline">
+                        $${totalLinea.toFixed(2)}
+                    </td>
+                    <td class="p-3 text-center">
+                        <button type="button" onclick="eliminarLineaOrden(${index})" class="p-1 rounded text-red-600 hover:bg-red-50">
+                            <span class="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                    </td>
+                </tr>`;
+        });
+
+        tbody.innerHTML = html;
+        actualizarTotalesOrden();
+    }
+
+    function cambiarProductoLinea(index, nuevoProdId) {
+        lineasOrden[index].ProductoCatalogoId = nuevoProdId;
+        renderizarLineasOrden();
+    }
+
+    function cambiarCantidadLinea(index, nuevaCant) {
+        lineasOrden[index].Cantidad = Number(nuevaCant) || 0;
+        renderizarLineasOrden();
+    }
+
+    function eliminarLineaOrden(index) {
+        lineasOrden.splice(index, 1);
+        renderizarLineasOrden();
+    }
+
+    function actualizarTotalesOrden() {
+        let subtotalUsd = 0;
+        let descuentoUsd = 0;
+        let totalUsd = 0;
+
+        lineasOrden.forEach(l => {
+            const prod = CATALOGO_JSON.find(p => p.Id === l.ProductoCatalogoId);
+            if (!prod) return;
+            const cant = Number(l.Cantidad) || 0;
+            const sub = cant * prod.PrecioUnitarioUsd;
+            let desc = 0;
+
+            if (prod.AplicaDescuento && cant >= prod.UnidadesMinimasDescuento) {
+                if (prod.TipoDescuento === 'porcentaje') {
+                    desc = cant * (prod.PrecioUnitarioUsd * (prod.DescuentoPorcentaje / 100));
+                } else {
+                    const unitDesc = prod.DescuentoMonetarioUsd > 0 ? prod.DescuentoMonetarioUsd : (prod.DescuentoMonetarioNio / TASA_CAMBIO);
+                    desc = cant * unitDesc;
+                }
+            }
+
+            subtotalUsd += sub;
+            descuentoUsd += desc;
+            totalUsd += Math.max(0, sub - desc);
+        });
+
+        const totalNio = totalUsd * TASA_CAMBIO;
+
+        document.getElementById('resumen-subtotal-usd').textContent = '$ ' + subtotalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
+        document.getElementById('resumen-descuento-usd').textContent = '-$ ' + descuentoUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
+        document.getElementById('resumen-total-usd').textContent = '$ ' + totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
+        document.getElementById('resumen-total-nio').textContent = 'C$ ' + totalNio.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' NIO';
+    }
+
+    async function enviarOrdenCompra() {
+        const provId = document.getElementById('orden-proveedor-select').value;
+        if (!provId) {
+            alert('Debes seleccionar un proveedor.');
+            return;
+        }
+
+        if (lineasOrden.length === 0 || !lineasOrden.some(l => l.Cantidad > 0)) {
+            alert('Debes agregar al menos un producto con cantidad mayor a cero.');
+            return;
+        }
+
+        const moneda = document.getElementById('orden-moneda-select').value;
+        const fechaEntrega = document.getElementById('orden-fecha-entrega').value || null;
+        const observaciones = document.getElementById('orden-observaciones').value;
+
+        const payload = {
+            ProveedorId: provId,
+            Moneda: moneda,
+            FechaEntregaEsperada: fechaEntrega,
+            Observaciones: observaciones,
+            Lineas: lineasOrden.map(l => ({
+                ProductoCatalogoId: l.ProductoCatalogoId,
+                Cantidad: l.Cantidad
+            }))
+        };
+
+        const btn = document.getElementById('btn-emitir-orden-submit');
+        btn.disabled = true;
+        btn.innerHTML = `<span class="material-symbols-outlined text-[16px] animate-spin">refresh</span><span>Procesando...</span>`;
+
+        try {
+            const resp = await fetch('?handler=EmitirOrden', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await resp.json();
+            if (data.exito) {
+                alert(data.mensaje);
+                window.location.href = '/Compras?tab=ordenes';
+            } else {
+                alert('Atención: ' + data.mensaje);
+                btn.disabled = false;
+                btn.innerHTML = `<span class="material-symbols-outlined text-[16px]">send</span><span>Emitir Orden de Compra</span>`;
+            }
+        } catch (e) {
+            alert('Error de comunicación: ' + e);
+            btn.disabled = false;
+            btn.innerHTML = `<span class="material-symbols-outlined text-[16px]">send</span><span>Emitir Orden de Compra</span>`;
+        }
+    }
+
+    // Modal Helpers
+    function abrirModalNuevoProveedor() {
+        document.getElementById('modal-nuevo-proveedor').style.display = 'flex';
+    }
+    function cerrarModalNuevoProveedor() {
+        document.getElementById('modal-nuevo-proveedor').style.display = 'none';
+    }
+    function abrirModalNuevoProducto() {
+        document.getElementById('modal-nuevo-producto').style.display = 'flex';
+    }
+    function cerrarModalNuevoProducto() {
+        document.getElementById('modal-nuevo-producto').style.display = 'none';
+    }
+
+    function toggleSeccionDescuentoModal() {
+        const chk = document.getElementById('chk-aplica-descuento').checked;
+        const seccion = document.getElementById('seccion-descuento-inputs');
+        seccion.classList.toggle('hidden', !chk);
+    }
+
+    function actualizarTipoDescuentoModal() {
+        const tipo = document.getElementById('modal-tipo-descuento').value;
+        document.getElementById('campo-dto-porcentaje').classList.toggle('hidden', tipo !== 'porcentaje');
+        document.getElementById('campo-dto-monetario').classList.toggle('hidden', tipo !== 'monetario');
+    }
+
+    function sincronizarModalPrecios(origen) {
+        if (origen === 'usd') {
+            const usd = parseFloat(document.getElementById('modal-precio-usd').value) || 0;
+            document.getElementById('modal-precio-nio').value = (usd * TASA_CAMBIO).toFixed(2);
+        } else {
+            const nio = parseFloat(document.getElementById('modal-precio-nio').value) || 0;
+            document.getElementById('modal-precio-usd').value = (nio / TASA_CAMBIO).toFixed(2);
+        }
+    }
+
+    // Modal Recepción Kardex con Lote y Vencimiento
+    function abrirModalRecibirKardex(id, num) {
+        document.getElementById('recibir-orden-id').value = id;
+        document.getElementById('recibir-orden-numero').textContent = num;
+        document.getElementById('modal-recibir-kardex').style.display = 'flex';
+    }
+    function cerrarModalRecibirKardex() {
+        document.getElementById('modal-recibir-kardex').style.display = 'none';
+    }
+
+    // Modal Imprimir Orden / Factura / WhatsApp
+    function abrirModalImprimirOrden(ordId) {
+        const ord = ORDENES_JSON.find(o => o.Id === ordId);
+        if (!ord) {
+            alert('Orden no encontrada en los registros.');
+            return;
+        }
+        ordenActualFactura = ord;
+
+        document.getElementById('factura-numero-orden').textContent = ord.NumeroOrden;
+        document.getElementById('factura-fecha-emision').textContent = 'Fecha: ' + (ord.FechaEmision ? new Date(ord.FechaEmision).toLocaleDateString('es-NI') : 'Hoy');
+        document.getElementById('factura-badge-estado').textContent = ord.EstadoTexto || ord.Estado;
+        document.getElementById('factura-proveedor-nombre').textContent = ord.ProveedorNombre;
+        
+        const prov = PROVEEDORES_JSON.find(p => p.Id === ord.ProveedorId);
+        if (prov) {
+            document.getElementById('factura-proveedor-contacto').textContent = 'Contacto: ' + (prov.ContactoNombre || 'Oficina Comercial') + ' (Tel: ' + (prov.Telefono || 'N/A') + ')';
+            document.getElementById('factura-proveedor-condiciones').textContent = 'Condición: ' + (prov.CondicionesPago || 'Contado') + ' | RUC: ' + (prov.Ruc || 'N/A');
+            document.getElementById('factura-firma-proveedor').textContent = prov.NombreComercial;
+        } else {
+            document.getElementById('factura-proveedor-contacto').textContent = 'Proveedor Autorizado';
+            document.getElementById('factura-proveedor-condiciones').textContent = 'Condición de Pago Acordada';
+            document.getElementById('factura-firma-proveedor').textContent = ord.ProveedorNombre;
+        }
+
+        document.getElementById('factura-fecha-entrega').textContent = 'Entrega Estimada: ' + (ord.FechaEntregaEsperada ? new Date(ord.FechaEntregaEsperada).toLocaleDateString('es-NI') : 'Inmediata');
+        document.getElementById('factura-solicitado-por').textContent = 'Solicitado por: ' + (ord.SolicitadoPor || 'Luis (Admin)');
+        document.getElementById('factura-firma-elaborado').textContent = ord.SolicitadoPor || 'Luis (Admin)';
+        document.getElementById('factura-observaciones').textContent = ord.Observaciones || 'Sin instrucciones adicionales de entrega.';
+
+        // Llenar tabla de ítems
+        const tbody = document.getElementById('factura-items-tbody');
+        tbody.innerHTML = '';
+        if (ord.Detalles && ord.Detalles.length > 0) {
+            ord.Detalles.forEach(d => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="py-2 font-medium">${d.Descripcion}</td>
+                    <td class="py-2 text-center text-gray-500">${d.UnidadMedida}</td>
+                    <td class="py-2 text-right font-bold">${Number(d.Cantidad).toFixed(0)}</td>
+                    <td class="py-2 text-right font-medium">$${Number(d.PrecioUnitarioUsd).toFixed(2)}</td>
+                    <td class="py-2 text-right ${d.AplicoDescuento ? 'text-emerald-700 font-bold' : 'text-gray-400'}">
+                        ${d.AplicoDescuento ? '-$' + Number(d.MontoDescuentoLineaUsd).toFixed(2) : '$0.00'}
+                    </td>
+                    <td class="py-2 text-right text-gray-600">$${Number(d.SubtotalLineaUsd).toFixed(2)}</td>
+                    <td class="py-2 text-right font-bold text-gray-900">$${Number(d.TotalLineaUsd).toFixed(2)}</td>
+                    <td class="py-2 text-right font-bold text-emerald-800">C$ ${Number(d.TotalLineaNio).toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="py-4 text-center text-gray-500 italic">No hay ítems detallados para esta orden.</td>
+                </tr>`;
+        }
+
+        document.getElementById('factura-subtotal-usd').textContent = '$ ' + Number(ord.SubtotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        document.getElementById('factura-descuento-usd').textContent = '-$ ' + Number(ord.DescuentoUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        document.getElementById('factura-total-usd').textContent = '$ ' + Number(ord.TotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
+        document.getElementById('factura-total-nio').textContent = 'C$ ' + Number(ord.TotalNio).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' NIO';
+
+        document.getElementById('modal-imprimir-orden').style.display = 'flex';
+    }
+
+    function cerrarModalImprimirOrden() {
+        document.getElementById('modal-imprimir-orden').style.display = 'none';
+        ordenActualFactura = null;
+    }
+
+    function imprimirOrdenActual() {
+        window.print();
+    }
+
+    function enviarOrdenPorWhatsApp() {
+        if (!ordenActualFactura) return;
+        const ord = ordenActualFactura;
+        const prov = PROVEEDORES_JSON.find(p => p.Id === ord.ProveedorId);
+        const tel = prov && prov.Telefono ? prov.Telefono.replace(/[^0-9]/g, '') : '';
+        
+        let texto = `*ORDEN DE COMPRA OFICIAL - AGROPIG SUITE*%0A`;
+        texto += `*N° Orden:* ${ord.NumeroOrden}%0A`;
+        texto += `*Proveedor:* ${ord.ProveedorNombre}%0A`;
+        texto += `*Fecha:* ${new Date(ord.FechaEmision).toLocaleDateString('es-NI')}%0A`;
+        texto += `*Total:* $${Number(ord.TotalUsd).toFixed(2)} USD (C$ ${Number(ord.TotalNio).toFixed(2)} NIO)%0A`;
+        if (ord.DescuentoUsd > 0) {
+            texto += `*Descuento por volumen aplicado:* -$${Number(ord.DescuentoUsd).toFixed(2)} USD%0A`;
+        }
+        texto += `%0A*Detalle de Insumos:*%0A`;
+        if (ord.Detalles && ord.Detalles.length > 0) {
+            ord.Detalles.forEach(d => {
+                texto += `• ${d.Cantidad} ${d.UnidadMedida} - ${d.Descripcion} ($${Number(d.TotalLineaUsd).toFixed(2)} USD)%0A`;
+            });
+        }
+        texto += `%0A*Observaciones:* ${ord.Observaciones || 'Entrega estándar en granja.'}%0A`;
+        texto += `*Solicitado por:* ${ord.SolicitadoPor || 'Administración Granja San Jerónimo'}`;
+
+        const url = tel ? `https://api.whatsapp.com/send?phone=${tel}&text=${texto}` : `https://api.whatsapp.com/send?text=${texto}`;
+        window.open(url, '_blank');
+    }
+
+    // Activar tab inicial desde URL
+    document.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tab = urlParams.get('tab') || 'catalogo';
+        cambiarTab(tab);
+    });
+</script>

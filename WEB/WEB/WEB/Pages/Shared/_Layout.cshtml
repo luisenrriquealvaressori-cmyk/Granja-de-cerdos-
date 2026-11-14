@@ -1,0 +1,655 @@
+@inject WEB.Services.UserRoleService RoleService
+@inject WEB.Services.AgroPigDataService DataService
+<!DOCTYPE html>
+<html class="h-full bg-surface" lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - AgroPig Intelligence Suite</title>
+    
+    <!-- Material Symbols Outlined -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    
+    <!-- Google Fonts: Inter & Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS with Forms & Container Queries -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <!-- Chart.js 4.4 for Modern Animated Bar & Financial Visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#566342",
+                        "primary-container": "#a3b18a",
+                        "primary-fixed": "#dae8be",
+                        "primary-fixed-dim": "#becca3",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed": "#141f05",
+                        "on-primary-fixed-variant": "#3f4b2c",
+                        "on-primary-container": "#384425",
+                        "secondary": "#45664b",
+                        "secondary-container": "#c4e9c7",
+                        "secondary-fixed": "#c7ecca",
+                        "secondary-fixed-dim": "#abd0af",
+                        "on-secondary": "#ffffff",
+                        "on-secondary-fixed": "#02210c",
+                        "on-secondary-fixed-variant": "#2e4e35",
+                        "on-secondary-container": "#4a6a4f",
+                        "tertiary": "#406840",
+                        "tertiary-container": "#8bb788",
+                        "tertiary-fixed": "#c1eebc",
+                        "tertiary-fixed-dim": "#a5d2a2",
+                        "on-tertiary": "#ffffff",
+                        "on-tertiary-fixed": "#002106",
+                        "on-tertiary-fixed-variant": "#284f2a",
+                        "on-tertiary-container": "#214824",
+                        "surface": "#f9f9fb",
+                        "surface-dim": "#d9dadc",
+                        "surface-bright": "#f9f9fb",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#f3f3f6",
+                        "surface-container": "#edeef0",
+                        "surface-container-high": "#e8e8ea",
+                        "surface-container-highest": "#e2e2e5",
+                        "on-surface": "#1a1c1e",
+                        "on-surface-variant": "#45483f",
+                        "outline": "#76786e",
+                        "outline-variant": "#c6c8bb",
+                        "error": "#ba1a1a",
+                        "error-container": "#ffdad6",
+                        "on-error": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "background": "#f9f9fb",
+                        "on-background": "#1a1c1e"
+                    },
+                    fontFamily: {
+                        "headline": ["Plus Jakarta Sans", "sans-serif"],
+                        "body": ["Inter", "sans-serif"]
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            font-size: 20px;
+            display: inline-block;
+            vertical-align: middle;
+            line-height: 1;
+        }
+        .material-symbols-outlined.fill {
+            font-variation-settings: 'FILL' 1;
+        }
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+        }
+        /* Foco visible para teclado en todos los controles */
+        :focus-visible { outline: 2px solid #566342; outline-offset: 2px; border-radius: 6px; }
+        .skip-link { position: absolute; left: 8px; top: -48px; z-index: 100; background: #566342; color: #fff; padding: 8px 14px; border-radius: 8px; font-weight: 600; transition: top .15s; }
+        .skip-link:focus { top: 8px; }
+        /* Encabezados de tabla fijos al desplazar */
+        thead th { position: sticky; top: 0; z-index: 1; }
+        form[aria-busy="true"] { cursor: progress; }
+        @@media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+        }
+    </style>
+</head>
+<body class="h-full bg-surface text-on-surface antialiased flex flex-col font-body text-sm overflow-x-hidden">
+    <a href="#contenido" class="skip-link">Saltar al contenido</a>
+    @{
+        var currentPage = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
+        var user = RoleService.CurrentUser;
+        var rol = RoleService.CurrentRoleName;
+        var bloqueadoPorPassword = RoleService.DebeCambiarPassword;
+        var toast = ViewContext.TempData["Toast"] as string;
+        var notifs = await DataService.GetNotificacionesActivasAsync();
+    }
+
+    <!-- Backdrop para dispositivos móviles -->
+    <div id="sidebar-backdrop" onclick="toggleMobileSidebar()" class="fixed inset-0 bg-black/40 z-30 hidden md:hidden transition-opacity"></div>
+
+    <!-- 1. BARRA LATERAL FIJA Y RESPONSIVA (SideNavBar) -->
+    <aside id="main-sidebar" class="h-screen w-64 fixed left-0 top-0 z-40 flex flex-col justify-between border-r border-outline-variant bg-surface-container-lowest shadow-sm -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out">
+        <div class="p-4 flex flex-col gap-3 overflow-y-auto">
+            <!-- Brand & Mobile Close -->
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm shrink-0">
+                        <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1; font-size: 24px;">pets</span>
+                    </div>
+                    <div>
+                        <div class="font-headline font-bold text-lg text-primary tracking-tight leading-none">AgroPig</div>
+                        <div class="text-[10px] font-semibold text-on-surface-variant mt-0.5">Granja San José • Lógica &amp; Costes</div>
+                    </div>
+                </div>
+                <button type="button" aria-label="Cerrar menú de navegación" onclick="toggleMobileSidebar()" class="md:hidden p-1 rounded-lg text-outline hover:text-on-surface">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <!-- Active User Role Badge Card in Sidebar -->
+            <div class="p-2.5 rounded-lg border border-outline-variant/80 bg-surface-container-low flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-outline">Perfil Activo</span>
+                    <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full @(RoleService.EsAdmin ? "bg-emerald-100 text-emerald-800 border border-emerald-300" : RoleService.EsVeterinario ? "bg-teal-100 text-teal-800 border border-teal-300" : "bg-amber-100 text-amber-800 border border-amber-300")">
+                        <span class="material-symbols-outlined text-[12px]">@(user.Icono)</span>
+                        @user.Rol
+                    </span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full @user.AvatarColor flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                        @user.Iniciales
+                    </div>
+                    <div class="overflow-hidden">
+                        <div class="text-xs font-bold text-on-surface truncate">@user.Nombre</div>
+                        <div class="text-[10px] text-on-surface-variant truncate">@user.Cargo</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Context Action CTA -->
+            @if (RoleService.EsAdmin)
+            {
+                <button class="w-full flex items-center justify-center gap-2 bg-primary text-on-primary py-2 px-3 rounded-lg text-xs font-semibold hover:bg-secondary active:scale-[0.99] transition-all shadow-sm" type="button" onclick="window.location.href='/Lotes'">
+                    <span class="material-symbols-outlined text-[16px]">add_circle</span>
+                    <span>Nuevo Lote de Producción</span>
+                </button>
+            }
+            else if (RoleService.EsVeterinario)
+            {
+                <button class="w-full flex items-center justify-center gap-2 bg-teal-800 text-white py-2 px-3 rounded-lg text-xs font-semibold hover:bg-teal-900 active:scale-[0.99] transition-all shadow-sm" type="button" onclick="window.location.href='/Reproduccion'">
+                    <span class="material-symbols-outlined text-[16px]">vaccines</span>
+                    <span>Registro Inseminación IA</span>
+                </button>
+            }
+            else
+            {
+                <button class="w-full flex items-center justify-center gap-2 bg-amber-800 text-white py-2 px-3 rounded-lg text-xs font-semibold hover:bg-amber-900 active:scale-[0.99] transition-all shadow-sm" type="button" onclick="window.location.href='/Inventario#form-kardex'">
+                    <span class="material-symbols-outlined text-[16px]">inventory_2</span>
+                    <span>Recepción Insumo / Silo</span>
+                </button>
+            }
+
+            <!-- Primary Navigation Cluster grouped by Lógica & Costes / Ciclo & Operaciones / Abastecimiento -->
+            <nav aria-label="Navegación principal" class="flex flex-col gap-1 mt-1 @(bloqueadoPorPassword ? "pointer-events-none opacity-40" : "")">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-1 pb-0.5">Lógica &amp; Costes</div>
+
+                <!-- 1. Consola Lógica & Costes -->
+                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Index" || currentPage == "" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined @(currentPage == "/Index" || currentPage == "" ? "fill" : "")">dashboard</span>
+                        <span>Consola Lógica &amp; Costes</span>
+                    </div>
+                </a>
+
+                <!-- 2. Costes & Presupuestos (Exclusivo Administrador) -->
+                @if (RoleService.EsAdmin)
+                {
+                    <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Presupuestos" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Presupuestos">
+                        <div class="flex items-center gap-2.5">
+                            <span class="material-symbols-outlined @(currentPage == "/Presupuestos" ? "fill" : "")">monitoring</span>
+                            <span>Costes &amp; Presupuestos</span>
+                        </div>
+                        <span class="text-[9px] font-bold px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded">Admin</span>
+                    </a>
+                }
+
+                <!-- 3. Lotes & Simulador -->
+                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Lotes" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Lotes">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined @(currentPage == "/Lotes" ? "fill" : "")">pets</span>
+                        <span>Lotes &amp; Simulador</span>
+                    </div>
+                </a>
+
+                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-2.5 pb-0.5">Ciclo &amp; Operaciones</div>
+
+                <!-- 4. Ciclo 114d & Partos -->
+                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Reproduccion" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Reproduccion">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined @(currentPage == "/Reproduccion" ? "fill" : "")">vaccines</span>
+                        <span>Ciclo 114d &amp; Partos</span>
+                    </div>
+                    @if (RoleService.EsVeterinario)
+                    {
+                        <span class="text-[9px] font-bold px-1.5 py-0.2 bg-teal-100 text-teal-800 rounded">Clínica</span>
+                    }
+                </a>
+
+                <!-- 5. Padrón & Planes Zootécnicos -->
+                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Cerdos" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Cerdos">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined @(currentPage == "/Cerdos" ? "fill" : "")">grid_view</span>
+                        <span>Padrón &amp; Planes</span>
+                    </div>
+                    <span class="text-[9px] font-bold px-1.5 py-0.2 bg-primary/10 text-primary rounded">IA / Vac.</span>
+                </a>
+
+                <!-- 6. Tareas & Labores Sync -->
+                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Calendario" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Calendario">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined @(currentPage == "/Calendario" ? "fill" : "")">calendar_month</span>
+                        <span>Tareas &amp; Labores Sync</span>
+                    </div>
+                    <span class="text-[9px] font-bold px-1.5 py-0.2 bg-primary/10 text-primary rounded">Móvil</span>
+                </a>
+
+                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-2.5 pb-0.5">Abastecimiento &amp; Accesos</div>
+
+                <!-- 7. Silos & Kardex -->
+                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Inventario" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Inventario">
+                    <div class="flex items-center gap-2.5">
+                        <span class="material-symbols-outlined @(currentPage == "/Inventario" ? "fill" : "")">inventory_2</span>
+                        <span>Silos &amp; Kardex</span>
+                    </div>
+                </a>
+
+                <!-- 8. Compras & Descuentos (Admin y Veterinario) -->
+                @if (RoleService.EsAdmin || RoleService.EsVeterinario)
+                {
+                    <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Compras" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Compras">
+                        <div class="flex items-center gap-2.5">
+                            <span class="material-symbols-outlined @(currentPage == "/Compras" ? "fill" : "")">shopping_cart</span>
+                            <span>Compras &amp; Descuentos</span>
+                        </div>
+                    </a>
+                }
+
+                <!-- 9. Usuarios & Roles (Exclusivo Administrador) -->
+                @if (RoleService.EsAdmin)
+                {
+                    <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Usuarios" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Usuarios">
+                        <div class="flex items-center gap-2.5">
+                            <span class="material-symbols-outlined @(currentPage == "/Usuarios" ? "fill" : "")">admin_panel_settings</span>
+                            <span>Usuarios &amp; Roles</span>
+                        </div>
+                    </a>
+                }
+            </nav>
+        </div>
+
+        <!-- Operational State Footnote & Role Switch Helper -->
+        <div class="p-4 border-t border-outline-variant flex flex-col gap-2.5 bg-surface-container-low/30">
+            <!-- Live Sync Telemetry Badge -->
+            <div class="px-2.5 py-1.5 rounded-lg bg-surface-container flex items-center justify-between text-[11px] font-semibold">
+                <span class="text-on-surface-variant flex items-center gap-1.5">
+                    <span id="net-dot" class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span>
+                    Conexión
+                </span>
+                <span id="net-text" class="text-primary font-bold">En línea</span>
+            </div>
+            <div class="flex items-center justify-between text-[11px]">
+                <a href="/Cuenta" class="text-on-surface-variant hover:text-primary flex items-center gap-1 font-semibold">
+                    <span class="material-symbols-outlined text-[14px]">manage_accounts</span>
+                    <span>Mi cuenta</span>
+                </a>
+                <form method="post" asp-page="/Logout" class="inline">
+                    <button type="submit" class="text-error hover:underline flex items-center gap-1 font-semibold">
+                        <span class="material-symbols-outlined text-[14px]">logout</span>
+                        <span>Salir</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 2. MAIN WORKSPACE CONTAINER (Responsive: pl-0 on mobile, pl-64 on desktop) -->
+    <div class="pl-0 md:pl-64 flex flex-col min-h-screen">
+        <!-- TopNavBar -->
+        <header class="sticky top-0 z-20 bg-surface-container-lowest border-b border-outline-variant shadow-sm min-h-14 w-full px-4 sm:px-6 py-2 flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+            <!-- Left Anchor: Mobile Menu Toggle & Farm Context Selectors -->
+            <div class="flex items-center gap-2 sm:gap-3">
+                <!-- Mobile Hamburger Button -->
+                <button type="button" onclick="toggleMobileSidebar()" class="md:hidden p-1.5 rounded-lg border border-outline-variant text-on-surface hover:bg-surface-container-low active:scale-95 transition-all" aria-label="Abrir menú de navegación">
+                    <span class="material-symbols-outlined text-[20px]">menu</span>
+                </button>
+
+                <div class="flex items-center gap-1.5 sm:gap-2 bg-surface-container-low px-2.5 py-1.5 rounded-lg border border-outline-variant">
+                    <span class="material-symbols-outlined text-primary text-[18px]">location_on</span>
+                    <span class="text-xs font-semibold text-on-surface">Granja San José (Principal)</span>
+                </div>
+
+                <!-- Rol asignado (solo informativo: lo define el administrador, no se puede cambiar desde el navegador) -->
+                <div class="hidden sm:flex items-center gap-1.5 bg-primary-fixed/40 px-2.5 py-1.5 rounded-lg border border-primary/30" title="Rol asignado a tu cuenta">
+                    <span class="material-symbols-outlined text-primary text-[18px]">badge</span>
+                    <span class="text-xs font-bold text-primary">@user.Rol</span>
+                </div>
+
+                @if (RoleService.EsAdmin)
+                {
+                    <div class="hidden lg:flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200" title="Tasa de cambio bimonetaria oficial">
+                        <span class="material-symbols-outlined text-emerald-700 text-[16px]">currency_exchange</span>
+                        <span class="text-[11px] font-bold text-emerald-800 tabular-nums">TC Oficial: C$ 36.80 / $1 USD</span>
+                    </div>
+                }
+            </div>
+
+            <!-- Right Trailing Actions & User Cluster -->
+            <div class="flex items-center gap-2 sm:gap-3 ml-auto sm:ml-0">
+                @if (RoleService.PuedeGestionarPresupuestos)
+                {
+                    <button class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-secondary text-primary px-3 py-1.5 rounded text-xs font-semibold hover:bg-surface-container-low active:scale-[0.99] transition-all" type="button" onclick="if(window.toggleOffcanvas) toggleOffcanvas(true); else window.location.href='/Presupuestos';">
+                        <span class="material-symbols-outlined text-[16px]">add</span>
+                        <span class="hidden sm:inline">+ Registrar Gasto</span>
+                    </button>
+                }
+                else if (RoleService.PuedeRegistrarKardex)
+                {
+                    <button class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-amber-700 text-amber-900 px-3 py-1.5 rounded text-xs font-semibold hover:bg-surface-container-low active:scale-[0.99] transition-all" type="button" onclick="window.location.href='/Inventario#form-kardex';">
+                        <span class="material-symbols-outlined text-[16px]">input</span>
+                        <span class="hidden sm:inline">+ Entrada Kardex</span>
+                    </button>
+                }
+
+                <!-- Campana de Notificaciones & Alertas en Vivo -->
+                <div class="relative" id="dropdown-notificaciones-container">
+                    <button type="button" id="btn-notificaciones" aria-haspopup="true" aria-expanded="false" aria-controls="dropdown-notificaciones" aria-label="Notificaciones (@notifs.Count activas)" onclick="toggleDropdownNotificaciones()" class="relative p-1.5 rounded-lg border border-outline-variant hover:bg-surface-container-low transition text-on-surface flex items-center justify-center" title="Centro de Notificaciones en Vivo">
+                        <span class="material-symbols-outlined text-[19px]">notifications</span>
+                        @if (notifs.Count > 0)
+                        {
+                            <span class="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full text-[9px] font-black bg-error text-white flex items-center justify-center border border-white shadow-xs">
+                                @notifs.Count
+                            </span>
+                        }
+                    </button>
+
+                    <!-- Dropdown de Notificaciones -->
+                    <div id="dropdown-notificaciones" class="hidden absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white border border-outline-variant shadow-2xl z-50 p-4 transition-all duration-150">
+                        <div class="flex items-center justify-between pb-2.5 border-b border-outline-variant/60">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-primary text-[18px]">notifications_active</span>
+                                <span class="font-headline font-bold text-xs text-on-surface">Notificaciones Activas</span>
+                            </div>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                                @notifs.Count alertas
+                            </span>
+                        </div>
+
+                        <div class="mt-3 flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
+                            @if (notifs.Count == 0)
+                            {
+                                <div class="py-6 text-center text-xs text-outline font-medium">
+                                    <span class="material-symbols-outlined text-[24px] text-outline mb-1 block">notifications_off</span>
+                                    Sin notificaciones pendientes
+                                </div>
+                            }
+                            else
+                            {
+                                @foreach (var n in notifs.Take(5))
+                                {
+                                    <a href="@(string.IsNullOrEmpty(n.UrlDestino) ? "/Calendario" : n.UrlDestino)" class="p-2.5 rounded-xl border border-outline-variant/70 bg-surface-container-low/40 hover:bg-surface-container-low transition flex items-start gap-2.5 text-left">
+                                        <div class="w-6 h-6 rounded-lg @n.BadgeColor flex items-center justify-center shrink-0 mt-0.5">
+                                            <span class="material-symbols-outlined text-[14px]">@n.Icono</span>
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="text-[11px] font-bold text-on-surface truncate">@n.Titulo</div>
+                                            <p class="text-[10px] text-on-surface-variant leading-tight line-clamp-2 mt-0.5">@n.Mensaje</p>
+                                        </div>
+                                    </a>
+                                }
+                            }
+                        </div>
+
+                        <div class="mt-3 pt-2.5 border-t border-outline-variant/60 flex items-center justify-between">
+                            <a href="/Calendario" class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                                <span>Ver todas en Cronograma</span>
+                                <span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+                            </a>
+                            <button type="button" onclick="toggleDropdownNotificaciones()" class="text-[11px] text-outline hover:text-on-surface font-semibold">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="h-4 w-px bg-outline-variant mx-1 hidden sm:block"></div>
+
+                <!-- User Operator Identity & Switch Actions -->
+                <div class="flex items-center gap-2 pl-1">
+                    <div class="w-8 h-8 rounded-full @user.AvatarColor flex items-center justify-center font-bold text-xs shadow-xs shrink-0">
+                        @user.Iniciales
+                    </div>
+                    <div class="hidden sm:flex flex-col text-left">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-xs font-bold text-on-surface leading-tight truncate max-w-[130px]">@user.Nombre</span>
+                            <span class="text-[9px] font-bold px-1.5 py-0.2 rounded-full @(RoleService.EsAdmin ? "bg-emerald-100 text-emerald-800" : RoleService.EsVeterinario ? "bg-teal-100 text-teal-800" : "bg-amber-100 text-amber-800")">
+                                @user.Rol
+                            </span>
+                        </div>
+                        <span class="text-[10px] text-on-surface-variant leading-tight truncate max-w-[150px]">@user.Cargo (@user.Matricula)</span>
+                    </div>
+
+                    <!-- Enlaces Rápidos de Sesión -->
+                    <div class="flex items-center gap-1 ml-1">
+                        <a href="/Cuenta" aria-label="Mi cuenta" class="p-1.5 rounded-lg border border-outline-variant text-primary hover:bg-surface-container-low text-xs font-semibold flex items-center gap-1" title="Mi cuenta">
+                            <span class="material-symbols-outlined text-[16px]">manage_accounts</span>
+                            <span class="hidden xl:inline text-[11px]">Mi cuenta</span>
+                        </a>
+                        <form method="post" asp-page="/Logout" class="inline">
+                            <button type="submit" aria-label="Cerrar sesión" class="p-1.5 rounded-lg border border-error/30 text-error hover:bg-error-container text-xs font-semibold flex items-center gap-1" title="Cerrar Sesión">
+                                <span class="material-symbols-outlined text-[16px]">logout</span>
+                                <span class="hidden xl:inline text-[11px]">Salir</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Body -->
+        <main id="contenido" tabindex="-1" class="flex-1 outline-none">
+            @RenderBody()
+        </main>
+
+        <!-- Global Footer Line -->
+        <footer class="mt-auto border-t border-outline-variant bg-surface-container-lowest px-4 sm:px-6 py-3 text-xs text-on-surface-variant flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div>
+                <span>AgroPig Intelligence © @DateTime.Now.Year. Base de Datos Central PostgreSQL <strong>agropig_db</strong></span>
+            </div>
+            <div class="flex items-center gap-4 flex-wrap">
+                <span>Rol Actual: <strong class="text-primary font-bold">@user.Rol</strong></span>
+                <span>Usuario: <strong>@user.Nombre</strong></span>
+                <a href="/Cuenta" class="text-primary font-semibold hover:underline">Mi cuenta</a>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal de confirmación global (reemplaza window.confirm en formularios destructivos) -->
+    <div id="confirm-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="absolute inset-0 bg-black/45 backdrop-blur-[2px]" data-confirm-cancel></div>
+        <div class="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl border border-outline-variant p-6 transform transition-all duration-200 scale-95 opacity-0" id="confirm-panel">
+            <div class="w-12 h-12 rounded-2xl bg-error-container text-error flex items-center justify-center mb-4">
+                <span class="material-symbols-outlined" style="font-size:26px;font-variation-settings:'FILL' 1;">warning</span>
+            </div>
+            <h2 id="confirm-title" class="font-headline text-lg font-extrabold text-on-surface">Confirmar acción</h2>
+            <p id="confirm-message" class="mt-1.5 text-sm text-on-surface-variant leading-relaxed"></p>
+            <div class="mt-6 flex items-center justify-end gap-2.5">
+                <button type="button" data-confirm-cancel class="rounded-xl border border-outline-variant px-4 py-2 text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low transition">Cancelar</button>
+                <button type="button" id="confirm-accept" class="rounded-xl bg-error text-white px-4 py-2 text-sm font-bold shadow-md hover:opacity-90 active:scale-[.98] transition">Sí, continuar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast-host" class="fixed bottom-5 right-5 z-[70] flex flex-col gap-2 pointer-events-none" role="status" aria-live="polite"></div>
+
+    <script>
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('main-sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            if (sidebar.classList.contains('-translate-x-full')) {
+                sidebar.classList.remove('-translate-x-full');
+                backdrop.classList.remove('hidden');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                backdrop.classList.add('hidden');
+            }
+        }
+
+        // Toast global: window.showToast('mensaje', 'ok' | 'error')
+        window.showToast = function (msg, tipo) {
+            const host = document.getElementById('toast-host');
+            const el = document.createElement('div');
+            const ok = tipo !== 'error';
+            el.className = 'pointer-events-auto flex items-center gap-2.5 rounded-xl px-4 py-3 text-sm font-semibold shadow-xl border transition-all duration-300 translate-y-2 opacity-0 ' +
+                (ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-error-container border-error/40 text-error');
+            el.innerHTML = '<span class="material-symbols-outlined">' + (ok ? 'check_circle' : 'error') + '</span><span></span>';
+            el.lastChild.textContent = msg;
+            host.appendChild(el);
+            requestAnimationFrame(function () { el.classList.remove('translate-y-2', 'opacity-0'); });
+            setTimeout(function () { el.classList.add('opacity-0', 'translate-y-2'); setTimeout(function () { el.remove(); }, 300); }, 4500);
+        };
+
+        // Convierte onsubmit="return confirm('...')" en un modal accesible, sin tocar cada formulario
+        (function () {
+            const modal = document.getElementById('confirm-modal');
+            const panel = document.getElementById('confirm-panel');
+            const msg = document.getElementById('confirm-message');
+            const accept = document.getElementById('confirm-accept');
+            let pendiente = null;
+
+            function abrir(texto, form) {
+                pendiente = form; msg.textContent = texto;
+                modal.classList.remove('hidden'); modal.classList.add('flex');
+                requestAnimationFrame(function () { panel.classList.remove('scale-95', 'opacity-0'); });
+                accept.focus();
+            }
+            function cerrar() {
+                panel.classList.add('scale-95', 'opacity-0');
+                modal.classList.add('hidden'); modal.classList.remove('flex');
+                pendiente = null;
+            }
+
+            document.querySelectorAll('form[onsubmit*="confirm("]').forEach(function (f) {
+                const m = /confirm\((['"])([\s\S]*?)\1\)/.exec(f.getAttribute('onsubmit') || '');
+                if (!m) return;
+                f.removeAttribute('onsubmit');
+                f.addEventListener('submit', function (e) {
+                    if (f.dataset.confirmado === '1') return;
+                    e.preventDefault();
+                    abrir(m[2], f);
+                });
+            });
+
+            accept.addEventListener('click', function () {
+                const f = pendiente; if (!f) return;
+                f.dataset.confirmado = '1'; cerrar(); f.requestSubmit ? f.requestSubmit() : f.submit();
+            });
+            modal.querySelectorAll('[data-confirm-cancel]').forEach(function (b) { b.addEventListener('click', cerrar); });
+            document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && pendiente) cerrar(); });
+        })();
+
+        function toggleDropdownNotificaciones() {
+            const dropdown = document.getElementById('dropdown-notificaciones');
+            if (dropdown) {
+                dropdown.classList.toggle('hidden');
+                var bell = document.getElementById('btn-notificaciones');
+                if (bell) bell.setAttribute('aria-expanded', dropdown.classList.contains('hidden') ? 'false' : 'true');
+            }
+        }
+
+        document.addEventListener('click', function (e) {
+            const container = document.getElementById('dropdown-notificaciones-container');
+            const dropdown = document.getElementById('dropdown-notificaciones');
+            if (container && dropdown && !container.contains(e.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // Mejoras transversales de accesibilidad y usabilidad (se aplican a todas las páginas)
+        (function () {
+            // Estado de conexión real del navegador (antes era un texto fijo)
+            var dot = document.getElementById('net-dot'), txt = document.getElementById('net-text');
+            function net() {
+                var on = navigator.onLine;
+                if (txt) { txt.textContent = on ? 'En línea' : 'Sin conexión'; txt.className = (on ? 'text-primary' : 'text-error') + ' font-bold'; }
+                if (dot) dot.className = 'w-2 h-2 rounded-full ' + (on ? 'bg-tertiary animate-pulse' : 'bg-error');
+                if (!on && window.__avisoOffline !== true) { window.__avisoOffline = true; window.showToast('Sin conexión: los cambios no se podrán guardar hasta recuperarla.', 'error'); }
+                if (on) window.__avisoOffline = false;
+            }
+            window.addEventListener('online', net); window.addEventListener('offline', net); net();
+
+            // Íconos decorativos fuera del árbol de accesibilidad (si no, el lector dice "close", "edit"...)
+            document.querySelectorAll('.material-symbols-outlined').forEach(function (i) { i.setAttribute('aria-hidden', 'true'); });
+
+            // Página actual en la navegación
+            document.querySelectorAll('#main-sidebar nav a').forEach(function (a) {
+                if (a.classList.contains('bg-primary-fixed')) a.setAttribute('aria-current', 'page');
+            });
+
+            // Controles sin etiqueta: se usa la etiqueta cercana, el placeholder o el nombre
+            document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),select,textarea').forEach(function (el) {
+                if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || el.closest('label')) return;
+                if (el.id && document.querySelector('label[for="' + el.id + '"]')) return;
+                var lbl = null, prev = el.previousElementSibling, par = el.parentElement;
+                if (prev && prev.tagName === 'LABEL') lbl = prev;
+                else if (par && par.querySelectorAll('input:not([type=hidden]),select,textarea').length === 1) lbl = par.querySelector('label');
+                var t = (lbl && lbl.textContent.trim()) || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('name');
+                if (t) el.setAttribute('aria-label', t.replace(/\*/g, '').replace(/\s+/g, ' ').trim());
+            });
+
+            // Botones/enlaces que solo tienen icono: nombre accesible desde title o desde el icono
+            var NOMBRES = { close: 'Cerrar', edit: 'Editar', delete: 'Eliminar', add: 'Agregar', menu: 'Menú', visibility: 'Ver detalle', search: 'Buscar', refresh: 'Actualizar', check: 'Confirmar', save: 'Guardar', print: 'Imprimir', download: 'Descargar' };
+            document.querySelectorAll('button,a').forEach(function (el) {
+                if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return;
+                var ic = el.querySelector('.material-symbols-outlined');
+                if (!ic) return;
+                var c = el.cloneNode(true);
+                c.querySelectorAll('.material-symbols-outlined').forEach(function (n) { n.remove(); });
+                if (c.textContent.trim()) return;
+                var nombre = el.getAttribute('title') || NOMBRES[ic.textContent.trim()] || ic.textContent.trim().replace(/_/g, ' ');
+                el.setAttribute('aria-label', nombre);
+            });
+
+            // Tablas: desplazamiento horizontal en pantallas pequeñas y encabezados con alcance
+            document.querySelectorAll('table').forEach(function (t) {
+                if (!t.closest('.overflow-x-auto')) {
+                    var w = document.createElement('div'); w.className = 'overflow-x-auto';
+                    t.parentNode.insertBefore(w, t); w.appendChild(t);
+                }
+                t.querySelectorAll('thead th').forEach(function (th) { if (!th.getAttribute('scope')) th.setAttribute('scope', 'col'); });
+            });
+
+            // Evita doble envío (gastos, kardex, partos duplicados) y muestra que se está procesando
+            document.addEventListener('submit', function (e) {
+                var f = e.target;
+                if (e.defaultPrevented || !f || f.method !== 'post') return;
+                if (f.dataset.enviando === '1') { e.preventDefault(); return; }
+                f.dataset.enviando = '1';
+                f.setAttribute('aria-busy', 'true');
+                f.querySelectorAll('button[type=submit],button:not([type])').forEach(function (b) { b.classList.add('opacity-60', 'cursor-wait'); });
+            });
+            window.addEventListener('pageshow', function () {
+                document.querySelectorAll('form[data-enviando]').forEach(function (f) {
+                    delete f.dataset.enviando; f.removeAttribute('aria-busy');
+                    f.querySelectorAll('button').forEach(function (b) { b.classList.remove('opacity-60', 'cursor-wait'); });
+                });
+            });
+
+            // Esc cierra el menú lateral móvil y las notificaciones
+            document.addEventListener('keydown', function (e) {
+                if (e.key !== 'Escape') return;
+                var dd = document.getElementById('dropdown-notificaciones');
+                if (dd && !dd.classList.contains('hidden')) toggleDropdownNotificaciones();
+                var sb = document.getElementById('main-sidebar');
+                if (sb && !sb.classList.contains('-translate-x-full') && window.innerWidth < 768) toggleMobileSidebar();
+            });
+        })();
+
+        @if (!string.IsNullOrEmpty(toast))
+        {
+            <text>document.addEventListener('DOMContentLoaded', function () { showToast(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(toast)), 'ok'); });</text>
+        }
+    </script>
+
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

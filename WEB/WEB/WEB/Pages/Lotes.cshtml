@@ -1,0 +1,407 @@
+@page
+@model LotesModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Lotes & Simulador";
+    var totalCabezas = Model.Data.LotesCoexistentes.Sum(x => x.Cabezas);
+    var capacidadReal = Model.Data.GalponesTecnicos.Sum(g => g.Jaulas.Count > 0 ? g.Jaulas.Sum(j => j.CapacidadMaxima) : g.CapacidadMaxima);
+    var pDef = Model.Data.ProyeccionDefecto;
+}
+
+<div class="p-4 sm:p-6 max-w-[1440px] mx-auto flex flex-col gap-5">
+    <!-- Encabezado -->
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-primary-fixed text-on-primary-fixed">
+                Lógica Productiva &amp; Proyección Financiera
+            </span>
+            <h1 class="font-headline text-xl sm:text-2xl font-extrabold text-on-surface mt-1">
+                Lotes, Simulador de Costes &amp; Galpones
+            </h1>
+            <p class="text-xs text-on-surface-variant">
+                Seguimiento de piaras coexistentes, proyección zootécnica a fecha tope e infraestructura real de la granja.
+            </p>
+        </div>
+        @if (RoleService.EsAdmin || RoleService.EsVeterinario)
+        {
+            <button type="button" onclick="document.getElementById('modal-nuevo-lote').style.display='flex'" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition shadow-xs">
+                <span class="material-symbols-outlined text-[16px]">add_circle</span>
+                <span>Aperturar Lote</span>
+            </button>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(Model.MensajeExito))
+    {
+        <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+            <span class="material-symbols-outlined text-emerald-700">check_circle</span>
+            <span>@Model.MensajeExito</span>
+        </div>
+    }
+
+    <!-- 4 KPIs Reales -->
+    <div class="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">LOTES ACTIVOS</div>
+            <div class="mt-1.5 font-headline text-2xl font-extrabold tabular-nums">@Model.Data.LotesCoexistentes.Count</div>
+            <div class="text-[11px] text-outline">En crianza y ceba</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">POBLACIÓN EN LOTES</div>
+            <div class="mt-1.5 font-headline text-2xl font-extrabold tabular-nums text-primary">@totalCabezas cab.</div>
+            <div class="text-[11px] text-outline">Suma de animales activos</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">CAPACIDAD INSTALADA</div>
+            <div class="mt-1.5 font-headline text-2xl font-extrabold tabular-nums">@capacidadReal plazas</div>
+            <div class="text-[11px] text-outline">Según galpones y corrales 5×3m</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">RESERVA SILOS</div>
+            <div class="mt-1.5 font-headline text-2xl font-extrabold tabular-nums text-secondary">@Model.Data.ToneladasAlimentoSilo.ToString("N2") t</div>
+            <div class="text-[11px] text-outline">Alimento balanceado disponible</div>
+        </div>
+    </div>
+
+    <!-- Pestañas -->
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-xs overflow-hidden">
+        <div class="border-b border-outline-variant bg-surface-container-low px-4 pt-3 flex gap-2 overflow-x-auto" role="tablist">
+            <button type="button" onclick="activarTabL('activos')" id="ltab-btn-activos" class="px-4 py-2 text-xs font-bold rounded-t-xl border border-b-0 border-outline-variant bg-surface-container-lowest text-primary">
+                Lotes Coexistentes (@Model.Data.LotesCoexistentes.Count)
+            </button>
+            <button type="button" onclick="activarTabL('simulador')" id="ltab-btn-simulador" class="px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface">
+                Simulador Lógico &amp; Costes (Fecha Tope)
+            </button>
+            <button type="button" onclick="activarTabL('infra')" id="ltab-btn-infra" class="px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface">
+                Galpones &amp; Corrales 5×3m (@Model.Data.GalponesTecnicos.Count)
+            </button>
+        </div>
+
+        <!-- Tab 1: Lotes Coexistentes -->
+        <div id="ltab-activos" class="p-4 overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="bg-surface-container-high font-bold border-b border-outline-variant">
+                        <th class="p-3">Código Lote</th>
+                        <th class="p-3">Etapa Zootécnica</th>
+                        <th class="p-3">Galpón</th>
+                        <th class="p-3 text-right">Cabezas</th>
+                        <th class="p-3 text-right">Peso Promedio</th>
+                        <th class="p-3 text-right">Días de Ciclo</th>
+                        <th class="p-3 text-center">Proyectar</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant/60">
+                    @foreach (var lc in Model.Data.LotesCoexistentes)
+                    {
+                        <tr class="hover:bg-surface-container-low/50">
+                            <td class="p-3 font-bold text-primary">@lc.Codigo</td>
+                            <td class="p-3 capitalize">@lc.Etapa.Replace('_', ' ')</td>
+                            <td class="p-3 text-on-surface-variant">@lc.Galpon</td>
+                            <td class="p-3 text-right font-bold tabular-nums">@lc.Cabezas</td>
+                            <td class="p-3 text-right tabular-nums">
+                                <span class="font-bold">@lc.PesoPromedioKg.ToString("N1") Kg</span>
+                                <span class="text-[10px] text-outline">(@((lc.PesoPromedioKg * 2.20462m).ToString("N1")) lb)</span>
+                            </td>
+                            <td class="p-3 text-right font-semibold tabular-nums">@lc.DiasCiclo d</td>
+                            <td class="p-3 text-center">
+                                <button type="button" onclick="cargarLoteEnSimulador('@lc.Codigo')" class="px-2.5 py-1 rounded-lg border border-primary/40 text-primary font-bold hover:bg-primary-fixed/40 text-[11px]">
+                                    Simular &rarr;
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                    @if (Model.Data.LotesCoexistentes.Count == 0)
+                    {
+                        <tr><td colspan="7" class="p-8 text-center text-on-surface-variant">No hay lotes activos todavía.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Tab 2: Simulador Lógico & Costes -->
+        <div id="ltab-simulador" class="hidden p-4 grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div class="lg:col-span-5 bg-surface-container-low border border-outline-variant rounded-xl p-4 flex flex-col gap-3 text-xs">
+                <div class="font-headline font-extrabold text-sm text-on-surface">Parámetros de Simulación</div>
+                <div>
+                    <label class="block font-bold mb-1">Lote Base</label>
+                    <select id="sim-lote" onchange="seleccionarLoteSimulador()" class="w-full rounded-lg border border-outline-variant bg-white px-3 py-2 font-semibold">
+                        <option value="">Personalizado</option>
+                        @foreach (var ld in Model.Data.LotesDisponibles)
+                        {
+                            <option value="@ld.Id" data-codigo="@ld.Codigo" data-cabezas="@ld.Cabezas" data-peso="@ld.PesoPromedioLbs.ToString(System.Globalization.CultureInfo.InvariantCulture)" data-cierre="@(ld.FechaCierreEstimada?.ToString("yyyy-MM-dd") ?? DateTime.Today.AddDays(60).ToString("yyyy-MM-dd"))">
+                                @ld.Codigo (@ld.Cabezas cab · @ld.PesoPromedioLbs.ToString("N1") lb)
+                            </option>
+                        }
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block font-bold mb-1">Cabezas</label>
+                        <input id="sim-cabezas" type="number" min="1" value="@pDef.Cabezas" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">Peso Actual (lb)</label>
+                        <input id="sim-peso" type="number" step="0.1" value="@pDef.PesoActualLbs.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">Fecha Tope Venta</label>
+                        <input id="sim-fecha" type="date" value="@pDef.FechaTope.ToString("yyyy-MM-dd")" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">GMD Esperada (lb/d)</label>
+                        <input id="sim-gmd" type="number" step="0.05" value="@pDef.GmdLbsDia.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">Consumo (lb/d)</label>
+                        <input id="sim-consumo" type="number" step="0.1" value="@pDef.ConsumoDiarioCerdoLbs.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">Tipo Cambio C$/$</label>
+                        <input id="sim-tc" type="number" step="0.01" value="36.80" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                    </div>
+                </div>
+
+                @if (RoleService.EsAdmin)
+                {
+                    <div class="pt-2 border-t border-outline-variant grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-bold mb-1">Alimento C$/qq</label>
+                            <input id="sim-precio-alim" type="number" step="10" value="@pDef.PrecioAlimentoQuintalNio.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5" />
+                        </div>
+                        <div>
+                            <label class="block font-bold mb-1">Venta Pie C$/lb</label>
+                            <input id="sim-precio-venta" type="number" step="0.5" value="@pDef.PrecioVentaLibraPieNio.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5" />
+                        </div>
+                        <div>
+                            <label class="block font-bold mb-1">Mano Obra C$/cerdo</label>
+                            <input id="sim-mo" type="number" step="10" value="@pDef.CostoManoObraPorCerdoNio.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5" />
+                        </div>
+                        <div>
+                            <label class="block font-bold mb-1">Sanidad C$/cerdo</label>
+                            <input id="sim-san" type="number" step="10" value="@pDef.CostoSanitarioPorCerdoNio.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5" />
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block font-bold mb-1">Indirectos C$/cerdo</label>
+                            <input id="sim-ind" type="number" step="10" value="@pDef.CostosIndirectosPorCerdoNio.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5" />
+                        </div>
+                    </div>
+                }
+
+                <button type="button" onclick="ejecutarSimulacion()" class="w-full py-2.5 rounded-xl bg-primary text-on-primary font-bold hover:bg-secondary transition">
+                    Recalcular Proyección Zootécnica y Costes
+                </button>
+            </div>
+
+            <div class="lg:col-span-7 flex flex-col gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-low">
+                        <div class="text-on-surface-variant font-bold">HORIZONTE &amp; PESO FINAL</div>
+                        <div class="mt-1 font-headline text-lg font-extrabold text-primary tabular-nums" id="res-peso-final">@pDef.PesoFinalProyectadoLbs.ToString("N1") lb (@pDef.PesoFinalProyectadoKg.ToString("N1") Kg)</div>
+                        <div class="text-[11px] text-outline" id="res-dias">Faltan @pDef.DiasRestantes días • Total lote: @pDef.PesoTotalLoteQuintales.ToString("N1") qq</div>
+                    </div>
+                    <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-low">
+                        <div class="text-on-surface-variant font-bold">ALIMENTO REQUERIDO</div>
+                        <div class="mt-1 font-headline text-lg font-extrabold text-on-surface tabular-nums" id="res-alimento-qq">@pDef.TotalAlimentoRequeridoQuintales.ToString("N1") qq</div>
+                        <div class="text-[11px] text-outline" id="res-toma">@pDef.ConsumoDiarioTomaLbs.ToString("N2") lb / cerdo / toma (2 tomas)</div>
+                    </div>
+                    <div class="p-3.5 rounded-xl border border-outline-variant bg-surface-container-low">
+                        <div class="text-on-surface-variant font-bold">CONSUMO DIARIO LOTE</div>
+                        <div class="mt-1 font-headline text-lg font-extrabold text-on-surface tabular-nums" id="res-consumo-lote">@pDef.ConsumoDiarioLoteQuintales.ToString("N2") qq/día</div>
+                        <div class="text-[11px] text-outline" id="res-consumo-lbs">@pDef.ConsumoDiarioLoteLbs.ToString("N0") lb/día totales</div>
+                    </div>
+                </div>
+
+                @if (RoleService.EsAdmin)
+                {
+                    <div class="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                            <div class="font-bold text-on-surface-variant">INVERSIÓN TOTAL ESTIMADA</div>
+                            <div class="font-headline text-xl font-extrabold text-on-surface tabular-nums" id="res-inv-total">C$ @pDef.InversionTotalNio.ToString("N2") ($ @pDef.InversionTotalUsd.ToString("N2"))</div>
+                            <div class="text-[11px] text-on-surface-variant mt-1" id="res-costo-unit">Costo/cerdo: C$ @pDef.CostoPorCerdoNio.ToString("N2") · Costo/lb: C$ @pDef.CostoPorLibraProducidaNio.ToString("N2")</div>
+                        </div>
+                        <div>
+                            <div class="font-bold text-emerald-800">UTILIDAD NETA Y ROI</div>
+                            <div class="font-headline text-xl font-extrabold text-emerald-800 tabular-nums" id="res-utilidad">C$ @pDef.GananciaNetaTotalNio.ToString("N2") ($ @pDef.GananciaNetaTotalUsd.ToString("N2"))</div>
+                            <div class="text-[11px] text-emerald-900 mt-1" id="res-roi">Margen: @pDef.MargenUtilidadPct.ToString("N1")% · ROI: @pDef.RetornoInversionRoiPct.ToString("N1")%</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Tab 3: Galpones & Jaulas 5x3m -->
+        <div id="ltab-infra" class="hidden p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            @foreach (var galpon in Model.Data.GalponesTecnicos)
+            {
+                <div class="border border-outline-variant rounded-xl p-4 bg-surface-container-low/50 flex flex-col gap-2.5 text-xs">
+                    <div class="flex items-center justify-between">
+                        <div class="font-headline font-extrabold text-sm text-on-surface">@galpon.Nombre</div>
+                        <span class="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed font-bold text-[10px]">@galpon.Codigo · Cap. @galpon.CapacidadMaxima</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        @foreach (var j in galpon.Jaulas)
+                        {
+                            <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/70">
+                                <div class="flex items-center justify-between font-bold">
+                                    <span>@j.Codigo</span>
+                                    <span class="text-primary tabular-nums">@j.OcupacionActual / @j.CapacidadMaxima</span>
+                                </div>
+                                <div class="text-[10px] text-outline mt-0.5">@j.DimensionesTexto</div>
+                                <div class="text-[10px] text-on-surface-variant">@j.CapacidadesTexto</div>
+                                <div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden mt-1.5">
+                                    <div class="h-full bg-secondary rounded-full" style="width: @Math.Min(100, j.PorcentajeOcupacion)%;"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Modal Aperturar Lote -->
+<div id="modal-nuevo-lote" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-md w-full p-5 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3 mb-3">
+            <h2 class="font-headline text-base font-extrabold">Aperturar Nuevo Lote</h2>
+            <button type="button" onclick="document.getElementById('modal-nuevo-lote').style.display='none'" class="text-outline hover:text-on-surface"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <form method="post" asp-page-handler="CrearLote" class="flex flex-col gap-3 text-xs">
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold mb-1">Etapa *</label>
+                    <select name="etapa" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        <option value="precebo">Precebo / Destete</option>
+                        <option value="crecimiento">Crecimiento / Levante</option>
+                        <option value="engorde_intensivo">Engorde Intensivo</option>
+                        <option value="reproduccion">Maternidad / Reproducción</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Galpón *</label>
+                    <select name="galponId" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        @foreach (var g in Model.Data.Galpones)
+                        {
+                            <option value="@g.Id">@g.Nombre (Cap. @g.Capacidad)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold mb-1">Cantidad Cabezas *</label>
+                    <input type="number" name="cantidad" min="1" value="30" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Peso Entrada (Kg) *</label>
+                    <input type="number" step="0.1" name="pesoEntrada" min="1" value="7.5" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold mb-1">Fecha Ingreso *</label>
+                    <input type="date" name="fechaIngreso" value="@DateTime.Today.ToString("yyyy-MM-dd")" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Línea Genética *</label>
+                    <select name="lineaGeneticaId" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2">
+                        @foreach (var lg in Model.Data.LineasGeneticas)
+                        {
+                            <option value="@lg.Id">@lg.Nombre (@lg.Casa)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Procedencia *</label>
+                <input type="text" name="procedencia" value="Destete Interno Granja San José" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+            </div>
+            <div class="flex justify-end gap-2 pt-2 border-t border-outline-variant">
+                <button type="button" onclick="document.getElementById('modal-nuevo-lote').style.display='none'" class="px-3 py-2 rounded-lg border border-outline-variant font-bold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-on-primary font-bold">Crear Lote</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function activarTabL(tab) {
+            ['activos', 'simulador', 'infra'].forEach(t => {
+                document.getElementById('ltab-' + t).classList.toggle('hidden', t !== tab);
+                document.getElementById('ltab-btn-' + t).className = t === tab
+                    ? 'px-4 py-2 text-xs font-bold rounded-t-xl border border-b-0 border-outline-variant bg-surface-container-lowest text-primary'
+                    : 'px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface';
+            });
+        }
+
+        function seleccionarLoteSimulador() {
+            const sel = document.getElementById('sim-lote');
+            const opt = sel.options[sel.selectedIndex];
+            if (opt && opt.value) {
+                document.getElementById('sim-cabezas').value = opt.dataset.cabezas || 1;
+                document.getElementById('sim-peso').value = opt.dataset.peso || 95;
+                document.getElementById('sim-fecha').value = opt.dataset.cierre || '';
+            }
+            ejecutarSimulacion();
+        }
+
+        function cargarLoteEnSimulador(codigo) {
+            activarTabL('simulador');
+            const sel = document.getElementById('sim-lote');
+            for (const opt of sel.options) {
+                if (opt.dataset.codigo === codigo) {
+                    sel.value = opt.value;
+                    seleccionarLoteSimulador();
+                    return;
+                }
+            }
+        }
+
+        async function ejecutarSimulacion() {
+            const params = new URLSearchParams({
+                loteId: document.getElementById('sim-lote').value || '',
+                cabezas: document.getElementById('sim-cabezas').value || '100',
+                pesoLbs: document.getElementById('sim-peso').value || '95',
+                fechaTope: document.getElementById('sim-fecha').value || '',
+                gmdLbs: document.getElementById('sim-gmd').value || '1.8',
+                consumoDiarioLbs: document.getElementById('sim-consumo').value || '5.8',
+                tipoCambio: document.getElementById('sim-tc').value || '36.80'
+            });
+            const elAlim = document.getElementById('sim-precio-alim');
+            if (elAlim) {
+                params.set('precioAlimentoQq', elAlim.value);
+                params.set('precioVentaLb', document.getElementById('sim-precio-venta').value);
+                params.set('costoManoObraCerdo', document.getElementById('sim-mo').value);
+                params.set('costoSanitarioCerdo', document.getElementById('sim-san').value);
+                params.set('costosIndirectosCerdo', document.getElementById('sim-ind').value);
+            }
+            const r = await fetch('/api/v1/lotes/proyeccion-fecha-tope?' + params.toString());
+            if (!r.ok) return;
+            const d = await r.json();
+            document.getElementById('res-peso-final').textContent = `${Number(d.pesoFinalProyectadoLbs).toFixed(1)} lb (${Number(d.pesoFinalProyectadoKg).toFixed(1)} Kg)`;
+            document.getElementById('res-dias').textContent = `Faltan ${d.diasRestantes} días • Total lote: ${Number(d.pesoTotalLoteQuintales).toFixed(1)} qq`;
+            document.getElementById('res-alimento-qq').textContent = `${Number(d.totalAlimentoRequeridoQuintales).toFixed(1)} qq`;
+            document.getElementById('res-toma').textContent = `${Number(d.consumoDiarioTomaLbs).toFixed(2)} lb / cerdo / toma (2 tomas)`;
+            document.getElementById('res-consumo-lote').textContent = `${Number(d.consumoDiarioLoteQuintales).toFixed(2)} qq/día`;
+            document.getElementById('res-consumo-lbs').textContent = `${Number(d.consumoDiarioLoteLbs).toFixed(0)} lb/día totales`;
+
+            const invEl = document.getElementById('res-inv-total');
+            if (invEl) {
+                invEl.textContent = `C$ ${Number(d.inversionTotalNio).toLocaleString('en-US', { minimumFractionDigits: 2 })} ($ ${Number(d.inversionTotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+                document.getElementById('res-costo-unit').textContent = `Costo/cerdo: C$ ${Number(d.costoPorCerdoNio).toFixed(2)} · Costo/lb: C$ ${Number(d.costoPorLibraProducidaNio).toFixed(2)}`;
+                document.getElementById('res-utilidad').textContent = `C$ ${Number(d.gananciaNetaTotalNio).toLocaleString('en-US', { minimumFractionDigits: 2 })} ($ ${Number(d.gananciaNetaTotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+                document.getElementById('res-roi').textContent = `Margen: ${Number(d.margenUtilidadPct).toFixed(1)}% · ROI: ${Number(d.retornoInversionRoiPct).toFixed(1)}%`;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const tab = new URLSearchParams(window.location.search).get('tab');
+            if (tab === 'simulador') activarTabL('simulador');
+            else if (tab === 'infra') activarTabL('infra');
+        });
+    </script>
+}

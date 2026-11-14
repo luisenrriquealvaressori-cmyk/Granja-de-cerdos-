@@ -1,0 +1,502 @@
+@page
+@model PresupuestosModel
+@{
+    ViewData["Title"] = "Costes & Presupuestos";
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    var centrosJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.BarrasCentroCosto);
+    var flujoJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.BarrasMensuales);
+}
+
+<div class="p-4 sm:p-6 max-w-[1440px] mx-auto flex flex-col gap-5">
+    <!-- Encabezado y Filtro -->
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Administración Financiera Bimonetaria
+            </span>
+            <h1 class="font-headline text-xl sm:text-2xl font-extrabold text-on-surface mt-1">
+                Costes, Presupuestos &amp; Auditoría Operativa
+            </h1>
+            <p class="text-xs text-on-surface-variant">
+                Control por lote y centro de costo (CC-ALIM, CC-NOM, CC-SAN, CC-SERV, CC-MANT, CC-VET) • Tasa oficial C$ 36.80 / $1 USD.
+            </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <form method="get" class="flex items-center gap-1.5">
+                <select name="LoteFiltro" onchange="this.form.submit()" class="text-xs font-bold rounded-xl border border-outline-variant bg-surface px-3 py-2 text-on-surface">
+                    <option value="">Todos los lotes</option>
+                    @foreach (var lote in Model.Data.ListaLotes)
+                    {
+                        <option value="@lote.Codigo" selected="@(Model.LoteFiltro == lote.Codigo)">@lote.Codigo (@lote.Cabezas cab.)</option>
+                    }
+                </select>
+            </form>
+
+            <div class="inline-flex rounded-xl border border-outline-variant bg-surface-container-low p-1 text-xs font-bold" role="group" aria-label="Moneda de visualización">
+                <button type="button" id="p-btn-usd" onclick="setMonedaPresupuestos('USD')" class="px-2.5 py-1 rounded-lg bg-primary text-on-primary">USD ($)</button>
+                <button type="button" id="p-btn-nio" onclick="setMonedaPresupuestos('NIO')" class="px-2.5 py-1 rounded-lg text-on-surface-variant">NIO (C$)</button>
+            </div>
+
+            <button type="button" onclick="abrirModal('modal-rubro')" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-primary text-primary text-xs font-bold hover:bg-primary-fixed/40 transition">
+                <span class="material-symbols-outlined text-[16px]">add_chart</span>
+                <span>Nuevo Rubro</span>
+            </button>
+            <button type="button" onclick="abrirModal('modal-gasto')" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition shadow-xs">
+                <span class="material-symbols-outlined text-[16px]">add_card</span>
+                <span>Registrar Gasto</span>
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Model.MensajeExito))
+    {
+        <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+            <span class="material-symbols-outlined text-emerald-700">check_circle</span>
+            <span>@Model.MensajeExito</span>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(Model.MensajeError))
+    {
+        <div class="p-3 rounded-xl bg-error-container border border-error/40 text-error text-xs font-semibold flex items-center gap-2">
+            <span class="material-symbols-outlined">error</span>
+            <span>@Model.MensajeError</span>
+        </div>
+    }
+
+    <!-- 4 KPIs Financieros -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">PRESUPUESTO ESTIMADO</div>
+            <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums money-val" data-usd="@Model.Data.TotalEstimado.ToString(inv)">
+                $ @Model.Data.TotalEstimado.ToString("N2")
+            </div>
+            <div class="text-[11px] text-outline mt-1">Meta aprobada en lotes filtrados</div>
+        </div>
+
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">GASTO EJECUTADO</div>
+            <div class="mt-2 font-headline text-2xl font-extrabold text-primary tabular-nums money-val" data-usd="@Model.Data.TotalEjecutado.ToString(inv)">
+                $ @Model.Data.TotalEjecutado.ToString("N2")
+            </div>
+            <div class="text-[11px] text-outline mt-1">Incluye consumos, compras y labores móviles</div>
+        </div>
+
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">DESVIACIÓN GLOBAL</div>
+            <div class="mt-2 font-headline text-2xl font-extrabold @(Model.Data.DesviacionNetaGlobal <= 0 ? "text-emerald-700" : "text-error") tabular-nums">
+                @Model.Data.DesviacionNetaGlobal.ToString("+0.0;-0.0;0.0")%
+            </div>
+            <div class="text-[11px] text-outline mt-1">@(Model.Data.DesviacionNetaGlobal <= 0 ? "Dentro del techo presupuestario" : "Sobre-ejecución detectada")</div>
+        </div>
+
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <div class="text-xs font-bold text-on-surface-variant">UTILIDAD NETA PROYECTADA</div>
+            <div class="mt-2 font-headline text-2xl font-extrabold @(Model.Data.UtilidadNetaUsd >= 0 ? "text-emerald-800" : "text-error") tabular-nums money-val" data-usd="@Model.Data.UtilidadNetaUsd.ToString(inv)">
+                $ @Model.Data.UtilidadNetaUsd.ToString("N2")
+            </div>
+            <div class="text-[11px] text-on-surface-variant mt-1">Margen neto: <strong>@Model.Data.MargenOperativoPct.ToString("N1")%</strong></div>
+        </div>
+    </div>
+
+    <!-- Gráficos Chart.js Reales -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <h2 class="font-headline text-sm font-extrabold text-on-surface mb-2">Ejecución por Centro de Costo</h2>
+            @if (Model.Data.BarrasCentroCosto.Count == 0)
+            {
+                <div class="py-10 text-center text-xs text-on-surface-variant bg-surface-container-low rounded-xl">Sin centros de costo con movimientos.</div>
+            }
+            else
+            {
+                <div class="h-60 relative"><canvas id="p-chart-centros"></canvas></div>
+            }
+        </div>
+
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+            <h2 class="font-headline text-sm font-extrabold text-on-surface mb-2">Ingresos vs. Gastos Mensuales</h2>
+            @if (Model.Data.BarrasMensuales.Count == 0)
+            {
+                <div class="py-10 text-center text-xs text-on-surface-variant bg-surface-container-low rounded-xl">Sin historial mensual registrado.</div>
+            }
+            else
+            {
+                <div class="h-60 relative"><canvas id="p-chart-flujo"></canvas></div>
+            }
+        </div>
+    </div>
+
+    <!-- Pestañas de Gestión -->
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-xs overflow-hidden">
+        <div class="border-b border-outline-variant bg-surface-container-low px-4 pt-3 flex gap-2 overflow-x-auto" role="tablist">
+            <button type="button" onclick="activarTabP('matriz')" id="tab-btn-matriz" class="px-4 py-2 text-xs font-bold rounded-t-xl border border-b-0 border-outline-variant bg-surface-container-lowest text-primary">
+                Matriz Presupuestaria (@Model.Data.Presupuestos.Count)
+            </button>
+            <button type="button" onclick="activarTabP('libro')" id="tab-btn-libro" class="px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface">
+                Libro Diario &amp; Labores (@Model.Data.GastosRecientes.Count)
+            </button>
+            <button type="button" onclick="activarTabP('clinica')" id="tab-btn-clinica" class="px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface">
+                Auditoría Sanitaria (@Model.Data.TratamientosAuditoria.Count)
+            </button>
+        </div>
+
+        <!-- Tab 1: Matriz Presupuestaria -->
+        <div id="tab-matriz" class="p-4 overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="bg-surface-container-high font-bold border-b border-outline-variant">
+                        <th class="p-3">Lote</th>
+                        <th class="p-3">Centro Costo</th>
+                        <th class="p-3">Rubro</th>
+                        <th class="p-3 text-right">Estimado</th>
+                        <th class="p-3 text-right">Ejecutado</th>
+                        <th class="p-3 text-center">Desvío</th>
+                        <th class="p-3 text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant/60">
+                    @foreach (var item in Model.Data.Presupuestos)
+                    {
+                        var desvCls = item.PorcentajeDesviacion <= 0 ? "bg-emerald-100 text-emerald-800 border-emerald-300" : item.PorcentajeDesviacion <= 15 ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-red-100 text-red-800 border-red-300";
+                        <tr class="hover:bg-surface-container-low/50">
+                            <td class="p-3 font-bold">@item.LoteCodigo</td>
+                            <td class="p-3 text-on-surface-variant">@item.CentroCosto</td>
+                            <td class="p-3 font-semibold">@item.Rubro</td>
+                            <td class="p-3 text-right font-bold tabular-nums money-val" data-usd="@item.MontoEstimado.ToString(inv)">$ @item.MontoEstimado.ToString("N2")</td>
+                            <td class="p-3 text-right font-bold tabular-nums money-val" data-usd="@item.MontoEjecutado.ToString(inv)">$ @item.MontoEjecutado.ToString("N2")</td>
+                            <td class="p-3 text-center">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border @desvCls tabular-nums">
+                                    @item.PorcentajeDesviacion.ToString("+0.0;-0.0;0.0")% · @item.EstadoBi
+                                </span>
+                            </td>
+                            <td class="p-3 text-center whitespace-nowrap">
+                                <button type="button" onclick="abrirEditarRubro('@item.Id', '@item.Rubro.Replace("'", "\\'")', '@item.MontoEstimado.ToString(inv)')" class="p-1.5 rounded-lg border border-outline-variant hover:bg-surface-container-low text-primary" title="Editar rubro">
+                                    <span class="material-symbols-outlined text-[16px]">edit</span>
+                                </button>
+                                <form method="post" asp-page-handler="EliminarRubroPresupuestario" class="inline" onsubmit="return confirm('¿Eliminar este rubro presupuestario?');">
+                                    <input type="hidden" name="id" value="@item.Id" />
+                                    <input type="hidden" name="LoteFiltro" value="@Model.LoteFiltro" />
+                                    <button type="submit" class="p-1.5 rounded-lg border border-error/30 hover:bg-error-container text-error" title="Eliminar rubro">
+                                        <span class="material-symbols-outlined text-[16px]">delete</span>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    @if (Model.Data.Presupuestos.Count == 0)
+                    {
+                        <tr><td colspan="7" class="p-8 text-center text-on-surface-variant">Sin rubros presupuestarios para el filtro actual.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Tab 2: Libro Diario & Labores Imputadas -->
+        <div id="tab-libro" class="hidden p-4 overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="bg-surface-container-high font-bold border-b border-outline-variant">
+                        <th class="p-3">Fecha</th>
+                        <th class="p-3">Lote / Centro</th>
+                        <th class="p-3">Tipo Movimiento</th>
+                        <th class="p-3">Concepto</th>
+                        <th class="p-3">Proveedor / Responsable</th>
+                        <th class="p-3 text-right">Monto</th>
+                        <th class="p-3 text-center">Anular</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant/60">
+                    @foreach (var g in Model.Data.GastosRecientes)
+                    {
+                        <tr class="hover:bg-surface-container-low/50">
+                            <td class="p-3 whitespace-nowrap tabular-nums">@g.Fecha.ToString("dd/MM/yyyy")</td>
+                            <td class="p-3">
+                                <div class="font-bold">@g.LoteCodigo</div>
+                                <div class="text-[10px] text-outline">@g.CentroCosto</div>
+                            </td>
+                            <td class="p-3">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-surface-container text-on-surface-variant border border-outline-variant">
+                                    @g.TipoMovimiento
+                                </span>
+                            </td>
+                            <td class="p-3 font-medium">@g.Concepto</td>
+                            <td class="p-3 text-on-surface-variant">@(!string.IsNullOrWhiteSpace(g.Proveedor) ? g.Proveedor : g.RegistradoPor)</td>
+                            <td class="p-3 text-right font-extrabold tabular-nums">
+                                <span class="money-val" data-usd="@g.MontoUsd.ToString(inv)">$ @g.MontoUsd.ToString("N2")</span>
+                                <div class="text-[10px] text-outline">C$ @((g.MontoUsd * 36.80m).ToString("N2"))</div>
+                            </td>
+                            <td class="p-3 text-center">
+                                <form method="post" asp-page-handler="EliminarGasto" class="inline" onsubmit="return confirm('¿Anular y revertir esta transacción?');">
+                                    <input type="hidden" name="transaccionId" value="@g.Id" />
+                                    <input type="hidden" name="LoteFiltro" value="@Model.LoteFiltro" />
+                                    <button type="submit" class="p-1.5 rounded-lg border border-error/30 hover:bg-error-container text-error" title="Anular gasto">
+                                        <span class="material-symbols-outlined text-[16px]">delete</span>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    @if (Model.Data.GastosRecientes.Count == 0)
+                    {
+                        <tr><td colspan="7" class="p-8 text-center text-on-surface-variant">Sin transacciones recientes.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Tab 3: Auditoría Sanitaria Sincronizada -->
+        <div id="tab-clinica" class="hidden p-4 overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="bg-surface-container-high font-bold border-b border-outline-variant">
+                        <th class="p-3">Fecha y Hora</th>
+                        <th class="p-3">Crotal / Ubicación</th>
+                        <th class="p-3">Medicamento</th>
+                        <th class="p-3 text-right">Dosis / Saldo Frasco</th>
+                        <th class="p-3">Responsable MVZ</th>
+                        <th class="p-3 text-right">Coste Imputado</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant/60">
+                    @foreach (var t in Model.Data.TratamientosAuditoria)
+                    {
+                        <tr class="hover:bg-surface-container-low/50">
+                            <td class="p-3 tabular-nums">@t.FechaHora.ToString("dd/MM/yyyy HH:mm")</td>
+                            <td class="p-3">
+                                <div class="font-bold">@t.CrotalCerda</div>
+                                <div class="text-[10px] text-outline">@t.GalponJaula</div>
+                            </td>
+                            <td class="p-3 font-semibold">
+                                @t.Medicamento
+                                <div class="text-[10px] text-outline">@t.ViaAdministracion · @t.Diagnostico</div>
+                            </td>
+                            <td class="p-3 text-right tabular-nums">
+                                <span class="font-bold">@t.DosisAplicada.ToString("N1") @t.UnidadMedida</span>
+                                <div class="text-[10px] text-outline">Resta: @t.FrascoRestanteMl.ToString("N1")/@t.FrascoInicialMl.ToString("N0") ml</div>
+                            </td>
+                            <td class="p-3">@t.VeterinarioResponsable <span class="text-[10px] text-outline">@t.Matricula</span></td>
+                            <td class="p-3 text-right font-bold tabular-nums money-val" data-usd="@t.CostoTotalUsd.ToString(inv)">$ @t.CostoTotalUsd.ToString("N2")</td>
+                        </tr>
+                    }
+                    @if (Model.Data.TratamientosAuditoria.Count == 0)
+                    {
+                        <tr><td colspan="6" class="p-8 text-center text-on-surface-variant">Sin tratamientos sincronizados desde campo.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuevo Rubro Presupuestario -->
+<div id="modal-rubro" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-md w-full p-5 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3 mb-3">
+            <h2 class="font-headline text-base font-extrabold">Nuevo Rubro Presupuestario</h2>
+            <button type="button" onclick="cerrarModal('modal-rubro')" class="text-outline hover:text-on-surface"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <form method="post" asp-page-handler="CrearRubroPresupuestario" class="flex flex-col gap-3 text-xs">
+            <input type="hidden" name="LoteFiltro" value="@Model.LoteFiltro" />
+            <div>
+                <label class="block font-bold mb-1">Lote *</label>
+                <select name="loteId" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                    @foreach (var l in Model.Data.ListaLotes)
+                    {
+                        <option value="@l.Id">@l.Codigo — @l.Etapa (@l.Cabezas cab.)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Centro de Costo *</label>
+                <select name="centroCostoId" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                    @foreach (var cc in Model.Data.ListaCentrosCosto)
+                    {
+                        <option value="@cc.Id">@cc.Codigo — @cc.Nombre</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Nombre del Rubro *</label>
+                <input type="text" name="rubroNombre" required placeholder="Ej. Alimento Engorde Fase 1" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Monto Estimado (USD $) *</label>
+                <input type="number" step="0.01" min="0.01" name="montoEstimado" required oninput="document.getElementById('rubro-nio-hint').textContent='Equivalente: C$ ' + ((parseFloat(this.value)||0)*36.80).toFixed(2)" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
+                <span id="rubro-nio-hint" class="text-[11px] text-outline mt-0.5 block">Equivalente: C$ 0.00</span>
+            </div>
+            <div class="flex justify-end gap-2 pt-2 border-t border-outline-variant">
+                <button type="button" onclick="cerrarModal('modal-rubro')" class="px-3 py-2 rounded-lg border border-outline-variant font-bold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-on-primary font-bold">Guardar Rubro</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Editar Rubro Presupuestario -->
+<div id="modal-editar-rubro" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-md w-full p-5 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3 mb-3">
+            <h2 class="font-headline text-base font-extrabold">Ajustar Rubro Presupuestario</h2>
+            <button type="button" onclick="cerrarModal('modal-editar-rubro')" class="text-outline hover:text-on-surface"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <form method="post" asp-page-handler="ActualizarRubroPresupuestario" class="flex flex-col gap-3 text-xs">
+            <input type="hidden" name="id" id="edit-rubro-id" />
+            <input type="hidden" name="LoteFiltro" value="@Model.LoteFiltro" />
+            <div>
+                <label class="block font-bold mb-1">Nombre del Rubro *</label>
+                <input type="text" name="rubroNombre" id="edit-rubro-nombre" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Nuevo Monto Estimado (USD $) *</label>
+                <input type="number" step="0.01" min="0.01" name="montoEstimado" id="edit-rubro-monto" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
+            </div>
+            <div class="flex justify-end gap-2 pt-2 border-t border-outline-variant">
+                <button type="button" onclick="cerrarModal('modal-editar-rubro')" class="px-3 py-2 rounded-lg border border-outline-variant font-bold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-on-primary font-bold">Actualizar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Registrar Gasto Operativo -->
+<div id="modal-gasto" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display: none;">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-md w-full p-5 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3 mb-3">
+            <h2 class="font-headline text-base font-extrabold">Registrar Gasto Operativo</h2>
+            <button type="button" onclick="cerrarModal('modal-gasto')" class="text-outline hover:text-on-surface"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <form method="post" asp-page-handler="RegistrarGasto" class="flex flex-col gap-3 text-xs">
+            <input type="hidden" name="LoteFiltro" value="@Model.LoteFiltro" />
+            <div>
+                <label class="block font-bold mb-1">Lote Imputado *</label>
+                <select name="loteId" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                    @foreach (var l in Model.Data.ListaLotes)
+                    {
+                        <option value="@l.Id">@l.Codigo — @l.Galpon</option>
+                    }
+                </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold mb-1">Centro Costo *</label>
+                    <select name="centroCostoId" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        @foreach (var cc in Model.Data.ListaCentrosCosto)
+                        {
+                            <option value="@cc.Id">@cc.Codigo — @cc.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Tipo *</label>
+                    <select name="tipoMovimiento" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        <option value="compra_alimento">Compra Alimento</option>
+                        <option value="mano_obra">Mano de Obra / Jornal</option>
+                        <option value="servicio_basico">Servicios (Agua/Luz)</option>
+                        <option value="mantenimiento">Mantenimiento</option>
+                        <option value="sanitario">Insumo Veterinario</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Concepto *</label>
+                <input type="text" name="concepto" required placeholder="Ej. Recibo energía eléctrica nave engorde" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold mb-1">Proveedor / Responsable</label>
+                    <input type="text" name="proveedor" value="Granja San José" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Fecha *</label>
+                    <input type="date" name="fecha" value="@DateTime.Today.ToString("yyyy-MM-dd")" required class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+                </div>
+            </div>
+            <div>
+                <label class="block font-bold mb-1">Monto (USD $) *</label>
+                <input type="number" step="0.01" min="0.01" name="monto" required oninput="document.getElementById('gasto-nio-hint').textContent='Equivalente: C$ ' + ((parseFloat(this.value)||0)*36.80).toFixed(2)" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
+                <span id="gasto-nio-hint" class="text-[11px] text-outline mt-0.5 block">Equivalente: C$ 0.00</span>
+            </div>
+            <div class="flex justify-end gap-2 pt-2 border-t border-outline-variant">
+                <button type="button" onclick="cerrarModal('modal-gasto')" class="px-3 py-2 rounded-lg border border-outline-variant font-bold">Cancelar</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-on-primary font-bold">Asentar Gasto</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const TASA = 36.80;
+        const pCentrosData = @Html.Raw(centrosJson);
+        const pFlujoData = @Html.Raw(flujoJson);
+        let pMoneda = 'USD', pChart1 = null, pChart2 = null;
+
+        function abrirModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function cerrarModal(id) { document.getElementById(id).style.display = 'none'; }
+        function abrirEditarRubro(id, nombre, monto) {
+            document.getElementById('edit-rubro-id').value = id;
+            document.getElementById('edit-rubro-nombre').value = nombre;
+            document.getElementById('edit-rubro-monto').value = monto;
+            abrirModal('modal-editar-rubro');
+        }
+
+        function activarTabP(tab) {
+            ['matriz', 'libro', 'clinica'].forEach(t => {
+                document.getElementById('tab-' + t).classList.toggle('hidden', t !== tab);
+                const btn = document.getElementById('tab-btn-' + t);
+                btn.className = t === tab
+                    ? 'px-4 py-2 text-xs font-bold rounded-t-xl border border-b-0 border-outline-variant bg-surface-container-lowest text-primary'
+                    : 'px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface';
+            });
+        }
+
+        function setMonedaPresupuestos(m) {
+            pMoneda = m;
+            document.getElementById('p-btn-usd').className = m === 'USD' ? 'px-2.5 py-1 rounded-lg bg-primary text-on-primary' : 'px-2.5 py-1 rounded-lg text-on-surface-variant';
+            document.getElementById('p-btn-nio').className = m === 'NIO' ? 'px-2.5 py-1 rounded-lg bg-primary text-on-primary' : 'px-2.5 py-1 rounded-lg text-on-surface-variant';
+            const mult = m === 'NIO' ? TASA : 1;
+            const sym = m === 'NIO' ? 'C$ ' : '$ ';
+            document.querySelectorAll('.money-val').forEach(el => {
+                const usd = parseFloat(el.dataset.usd || '0') || 0;
+                el.textContent = sym + (usd * mult).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            });
+            renderPCharts();
+        }
+
+        function renderPCharts() {
+            const mult = pMoneda === 'NIO' ? TASA : 1;
+            const sym = pMoneda === 'NIO' ? 'C$ ' : '$ ';
+            const c1 = document.getElementById('p-chart-centros');
+            if (c1 && pCentrosData.length > 0) {
+                if (pChart1) pChart1.destroy();
+                pChart1 = new Chart(c1, {
+                    type: 'bar',
+                    data: {
+                        labels: pCentrosData.map(x => x.Nombre),
+                        datasets: [
+                            { label: 'Presupuestado', data: pCentrosData.map(x => Number((x.PresupuestadoUsd * mult).toFixed(2))), backgroundColor: '#becca3', borderRadius: 6 },
+                            { label: 'Ejecutado', data: pCentrosData.map(x => Number((x.EjecutadoUsd * mult).toFixed(2))), backgroundColor: '#566342', borderRadius: 6 }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${sym}${Number(c.raw).toLocaleString('en-US', { minimumFractionDigits: 2 })}` } } } }
+                });
+            }
+            const c2 = document.getElementById('p-chart-flujo');
+            if (c2 && pFlujoData.length > 0) {
+                if (pChart2) pChart2.destroy();
+                pChart2 = new Chart(c2, {
+                    type: 'bar',
+                    data: {
+                        labels: pFlujoData.map(x => `${x.MesNombre} ${x.Anio}`),
+                        datasets: [
+                            { label: 'Ingresos', data: pFlujoData.map(x => Number((x.IngresosUsd * mult).toFixed(2))), backgroundColor: '#45664b', borderRadius: 6 },
+                            { label: 'Gastos', data: pFlujoData.map(x => Number((x.GastosUsd * mult).toFixed(2))), backgroundColor: '#ba1a1a', borderRadius: 6 }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${sym}${Number(c.raw).toLocaleString('en-US', { minimumFractionDigits: 2 })}` } } } }
+                });
+            }
+        }
+        document.addEventListener('DOMContentLoaded', renderPCharts);
+    </script>
+}

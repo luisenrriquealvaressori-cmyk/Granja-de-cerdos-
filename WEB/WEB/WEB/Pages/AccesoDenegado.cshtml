@@ -1,0 +1,26 @@
+@page
+@model WEB.Pages.AccesoDenegadoModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Acceso denegado";
+    var user = RoleService.CurrentUser;
+}
+
+<main class="min-h-[70vh] flex items-center justify-center p-6">
+    <div class="max-w-md w-full text-center">
+        <div class="mx-auto w-24 h-24 rounded-3xl bg-gradient-to-br from-error-container to-white border border-error/30 flex items-center justify-center shadow-lg">
+            <span class="material-symbols-outlined text-error" style="font-size:44px;font-variation-settings:'FILL' 1;">gpp_bad</span>
+        </div>
+        <h1 class="mt-6 font-headline text-2xl font-extrabold text-on-surface">No tienes permiso para esta acción</h1>
+        <p class="mt-2 text-sm text-on-surface-variant leading-relaxed">
+            Tu perfil <strong class="text-primary">@user.Rol</strong> no incluye acceso a este recurso.
+            Si crees que es un error, solicita el permiso al administrador de la granja. El intento quedó registrado.
+        </p>
+        <div class="mt-7 flex items-center justify-center gap-3">
+            <a href="/" class="inline-flex items-center gap-2 rounded-xl bg-primary text-white px-5 py-2.5 text-sm font-bold shadow-md hover:bg-secondary transition-all">
+                <span class="material-symbols-outlined text-[18px]">home</span> Ir al inicio
+            </a>
+            <button type="button" onclick="history.back()" class="rounded-xl border border-outline-variant px-5 py-2.5 text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low transition-all">Volver</button>
+        </div>
+    </div>
+</main>

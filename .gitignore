@@ -1,0 +1,27 @@
+# Build & IDE outputs
+**/bin/
+**/obj/
+**/build/
+**/.vs/
+**/.vscode/
+**/.idea/
+**/.gradle/
+**/.kotlin/
+.dotnet/
+.dotnet_home/
+.tempdotnet/
+*.apk
+
+# Local & Secret configuration
+**/local.properties
+**/*.csproj.user
+**/*.sln.docstates
+.env
+*.env
+**/secrets.dev.yaml
+
+# OS & Temp files
+.DS_Store
+Thumbs.db
+*.log
+

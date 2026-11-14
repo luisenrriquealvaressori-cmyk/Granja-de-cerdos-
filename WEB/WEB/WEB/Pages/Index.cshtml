@@ -1,0 +1,509 @@
+@page
+@model IndexModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Consola Lógica & Costes";
+    var invCulture = System.Globalization.CultureInfo.InvariantCulture;
+    var centrosJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.BarrasCentroCosto);
+    var flujoJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.BarrasMensuales);
+}
+
+<div class="p-4 sm:p-6 max-w-[1440px] mx-auto flex flex-col gap-5">
+    <!-- Encabezado y Controles -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-primary-fixed text-on-primary-fixed">
+                    Granja Porcina San José
+                </span>
+                <span class="text-[11px] text-on-surface-variant font-semibold">Motor en vivo PostgreSQL</span>
+            </div>
+            <h1 class="font-headline text-xl sm:text-2xl font-extrabold text-on-surface mt-1">
+                Consola de Lógica Zootécnica &amp; Costes
+            </h1>
+            <p class="text-xs text-on-surface-variant">
+                Indicadores biológicos (ICA, GMD, ciclo 114d), sincronización móvil de campo y rentabilidad bimonetaria.
+            </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            @if (RoleService.EsAdmin)
+            {
+                <div class="inline-flex rounded-xl border border-outline-variant bg-surface-container-low p-1 text-xs font-bold" role="group" aria-label="Selector de moneda">
+                    <button type="button" id="btn-moneda-usd" onclick="setMonedaConsola('USD')" class="px-3 py-1.5 rounded-lg bg-primary text-on-primary transition-all">USD ($)</button>
+                    <button type="button" id="btn-moneda-nio" onclick="setMonedaConsola('NIO')" class="px-3 py-1.5 rounded-lg text-on-surface-variant hover:text-on-surface transition-all">NIO (C$ 36.80)</button>
+                </div>
+                <a href="/Presupuestos" class="inline-flex items-center gap-1.5 bg-primary text-on-primary px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-secondary transition shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">monitoring</span>
+                    <span>Centro de Costes</span>
+                </a>
+            }
+            else
+            {
+                <a href="/Reproduccion" class="inline-flex items-center gap-1.5 bg-teal-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-teal-800 transition shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">child_care</span>
+                    <span>Ciclo 114d &amp; Partos</span>
+                </a>
+                <a href="/Calendario" class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-outline-variant text-on-surface px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-surface-container-low transition">
+                    <span class="material-symbols-outlined text-[16px]">calendar_month</span>
+                    <span>Tareas &amp; Labores</span>
+                </a>
+            }
+        </div>
+    </div>
+
+    <!-- Fila de 4 KPIs Reales (adaptados por rol) -->
+    @if (RoleService.EsAdmin)
+    {
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>COSTE / KG PRODUCIDO</span>
+                    <span class="material-symbols-outlined text-primary">payments</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums money-usd" data-usd="@Model.Data.CostoKgProducido.ToString(invCulture)">
+                    $ @Model.Data.CostoKgProducido.ToString("N2")
+                </div>
+                <div class="mt-1 text-[11px] font-semibold @(Model.Data.VariacionCostoTarget <= 0 ? "text-emerald-700" : "text-amber-700")">
+                    Desviación vs meta: @Model.Data.VariacionCostoTarget.ToString("+0.0;-0.0;0.0")% • Gasto total:
+                    <span class="money-usd font-bold" data-usd="@Model.Data.TotalGastosOperativosUsd.ToString(invCulture)">$ @Model.Data.TotalGastosOperativosUsd.ToString("N2")</span>
+                </div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>UTILIDAD &amp; MARGEN</span>
+                    <span class="material-symbols-outlined text-emerald-700">trending_up</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold @(Model.Data.UtilidadNetaUsd >= 0 ? "text-emerald-800" : "text-error") tabular-nums money-usd" data-usd="@Model.Data.UtilidadNetaUsd.ToString(invCulture)">
+                    $ @Model.Data.UtilidadNetaUsd.ToString("N2")
+                </div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">
+                    Margen operativo: <strong class="text-on-surface">@Model.Data.MargenOperativoPct.ToString("N1")%</strong> • Ingresos:
+                    <span class="money-usd font-bold" data-usd="@Model.Data.TotalIngresosVentasUsd.ToString(invCulture)">$ @Model.Data.TotalIngresosVentasUsd.ToString("N2")</span>
+                </div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>LOTES &amp; GANANCIA DIARIA</span>
+                    <span class="material-symbols-outlined text-primary">monitoring</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">
+                    @Model.Data.LotesActivosCount <span class="text-sm font-bold text-on-surface-variant">lotes activos</span>
+                </div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">
+                    GMD prom.: <strong>@Model.Data.GmdPromedio g/d</strong> • Fertilidad: <strong>@Model.Data.TasaFertilidad.ToString("N1")%</strong> (@Model.Data.ConfirmadasEco/@Model.Data.ServiciosMes)
+                </div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>RESERVA EN SILOS</span>
+                    <span class="material-symbols-outlined text-amber-700">warehouse</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">
+                    @Model.Data.ToneladasSilo.ToString("N2") t <span class="text-xs font-bold text-on-surface-variant">(@Model.Data.PorcentajeCapacidadSilos%)</span>
+                </div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">
+                    Consumo móvil hoy: <strong>@Model.Data.AlimentoSuministradoHoyKg.ToString("N1") Kg</strong> • Jaulas: <strong>@Model.Data.JaulasOcupadas/@Model.Data.JaulasTotales</strong>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>LOTES &amp; GMD PROMEDIO</span>
+                    <span class="material-symbols-outlined text-primary">pets</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.LotesActivosCount lotes</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Ganancia diaria promedio: <strong>@Model.Data.GmdPromedio g/día</strong></div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>FERTILIDAD &amp; CAMADA</span>
+                    <span class="material-symbols-outlined text-teal-700">child_care</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.TasaFertilidad.ToString("N1")%</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Prom. nacidos vivos: <strong>@Model.Data.PromedioNacidosVivos.ToString("N1")</strong> (@Model.Data.ConfirmadasEco/@Model.Data.ServiciosMes serv.)</div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>TAREAS &amp; LABORES HOY</span>
+                    <span class="material-symbols-outlined text-primary">task_alt</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.TareasCompletadasHoy / @(Model.Data.TareasCompletadasHoy + Model.Data.TareasPendientesHoy)</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Pendientes en turno: <strong>@Model.Data.TareasPendientesHoy</strong></div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>SILOS &amp; SANIDAD DEL MES</span>
+                    <span class="material-symbols-outlined text-amber-700">vaccines</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.ToneladasSilo.ToString("N2") t</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Hoy: <strong>@Model.Data.AlimentoSuministradoHoyKg.ToString("N1") Kg</strong> • Aplicaciones mes: <strong>@Model.Data.TratamientosAplicadosMes</strong></div>
+            </div>
+        </div>
+    }
+
+    <!-- Bloque Analítico de Costes (Solo Administrador) -->
+    @if (RoleService.EsAdmin)
+    {
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="font-headline text-sm font-extrabold text-on-surface">Presupuestado vs. Ejecutado por Centro de Costo</h2>
+                        <p class="text-[11px] text-on-surface-variant">Alimentación, Nómina/Labores, Sanidad y Servicios imputados desde PostgreSQL</p>
+                    </div>
+                    <a href="/Presupuestos" class="text-xs font-bold text-primary hover:underline">Detalle &rarr;</a>
+                </div>
+                @if (Model.Data.BarrasCentroCosto.Count == 0)
+                {
+                    <div class="py-10 text-center text-xs text-on-surface-variant bg-surface-container-low rounded-xl">
+                        Sin movimientos ni presupuestos por centro de costo todavía.
+                    </div>
+                }
+                else
+                {
+                    <div class="h-64 relative">
+                        <canvas id="chart-centros"></canvas>
+                    </div>
+                }
+            </section>
+
+            <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="font-headline text-sm font-extrabold text-on-surface">Flujo Operativo Mensual (Ingresos vs. Gastos)</h2>
+                        <p class="text-[11px] text-on-surface-variant">Evolución transaccional consolidada de los últimos meses</p>
+                    </div>
+                    <a href="/Lotes?tab=simulador" class="text-xs font-bold text-primary hover:underline">Simulador &rarr;</a>
+                </div>
+                @if (Model.Data.BarrasMensuales.Count == 0)
+                {
+                    <div class="py-10 text-center text-xs text-on-surface-variant bg-surface-container-low rounded-xl">
+                        Sin flujos mensuales registrados todavía.
+                    </div>
+                }
+                else
+                {
+                    <div class="h-64 relative">
+                        <canvas id="chart-flujo"></canvas>
+                    </div>
+                }
+            </section>
+        </div>
+    }
+
+    <!-- Bloque de Lógica Zootécnica en Vivo -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <!-- Eficiencia Biológica por Lote -->
+        <section class="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="font-headline text-sm font-extrabold text-on-surface">Eficiencia Biológica y Semáforo ICA por Lote</h2>
+                    <p class="text-[11px] text-on-surface-variant">Evaluación zootécnica real: peso, ganancia diaria (GMD) y conversión alimenticia (ICA)</p>
+                </div>
+                <a href="/Lotes" class="text-xs font-bold text-primary hover:underline">Ver lotes &rarr;</a>
+            </div>
+
+            @if (Model.Data.Lotes.Count == 0)
+            {
+                <div class="py-8 text-center text-xs text-on-surface-variant bg-surface-container-low rounded-xl">
+                    No hay lotes activos registrados. <a href="/Lotes" class="text-primary font-bold underline">Crear primer lote</a>.
+                </div>
+            }
+            else
+            {
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-surface-container-high text-on-surface font-bold border-b border-outline-variant">
+                                <th class="p-2.5">Lote / Galpón</th>
+                                <th class="p-2.5">Etapa</th>
+                                <th class="p-2.5 text-right">Cabezas</th>
+                                <th class="p-2.5 text-right">Peso Prom.</th>
+                                <th class="p-2.5 text-right">GMD</th>
+                                <th class="p-2.5 text-center">Lógica ICA</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-outline-variant/60">
+                            @foreach (var lote in Model.Data.Lotes)
+                            {
+                                var fcrBadge = lote.Fcr <= 0
+                                    ? "bg-stone-100 text-stone-700 border-stone-300"
+                                    : lote.Fcr <= 2.65m
+                                        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                        : lote.Fcr <= 3.00m
+                                            ? "bg-amber-100 text-amber-800 border-amber-300"
+                                            : "bg-red-100 text-red-800 border-red-300";
+                                var fcrEstado = lote.Fcr <= 0 ? "En inicio" : lote.Fcr <= 2.65m ? "Óptimo" : lote.Fcr <= 3.00m ? "Revisar tolva" : "Desvío";
+                                <tr class="hover:bg-surface-container-low/50">
+                                    <td class="p-2.5">
+                                        <div class="font-bold text-on-surface">@lote.Codigo</div>
+                                        <div class="text-[10px] text-on-surface-variant">@lote.Galpon</div>
+                                    </td>
+                                    <td class="p-2.5 capitalize text-on-surface-variant">@lote.Etapa.Replace('_', ' ')</td>
+                                    <td class="p-2.5 text-right font-bold tabular-nums">@lote.Cabezas</td>
+                                    <td class="p-2.5 text-right tabular-nums">
+                                        <span class="font-bold">@lote.PesoPromedioKg.ToString("N1") Kg</span>
+                                        <div class="text-[10px] text-outline">@((lote.PesoPromedioKg * 2.20462m).ToString("N0")) lb</div>
+                                    </td>
+                                    <td class="p-2.5 text-right font-bold tabular-nums">@lote.Gmd.ToString("N0") g/d</td>
+                                    <td class="p-2.5 text-center">
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border @fcrBadge tabular-nums">
+                                            @(lote.Fcr > 0 ? lote.Fcr.ToString("N2") : "—") · @fcrEstado
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <!-- Radar Gestación 114d & Estado de Silos -->
+        <section class="lg:col-span-5 flex flex-col gap-4">
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-headline text-sm font-extrabold text-on-surface">Radar de Partos (Ciclo 114 Días)</h2>
+                    <a href="/Reproduccion" class="text-xs font-bold text-primary hover:underline">Maternidad &rarr;</a>
+                </div>
+                @if (Model.Data.RadarPartos.Count == 0)
+                {
+                    <p class="text-xs text-on-surface-variant py-3">Sin cerdas gestantes próximas en este ciclo.</p>
+                }
+                else
+                {
+                    <div class="flex flex-col gap-2">
+                        @foreach (var p in Model.Data.RadarPartos.Take(4))
+                        {
+                            <div class="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/60">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="font-bold text-on-surface">@p.Caravana <span class="text-on-surface-variant font-normal">(@p.Jaula)</span></span>
+                                    <span class="font-bold text-primary tabular-nums">@p.DiasGestacion / 114d · @p.AvisoTemporal</span>
+                                </div>
+                                <div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden mt-1.5">
+                                    <div class="h-full bg-primary rounded-full" style="width: @Math.Min(100, Math.Max(4, p.PctAvance))%;"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-headline text-sm font-extrabold text-on-surface">Silos de Alimento</h2>
+                    <a href="/Inventario" class="text-xs font-bold text-primary hover:underline">Kardex &rarr;</a>
+                </div>
+                @if (Model.Data.Silos.Count == 0)
+                {
+                    <p class="text-xs text-on-surface-variant py-2">No hay silos configurados en el inventario.</p>
+                }
+                else
+                {
+                    <div class="flex flex-col gap-2">
+                        @foreach (var s in Model.Data.Silos)
+                        {
+                            var barCls = s.PorcentajeOcupacion < 20 ? "bg-error" : s.PorcentajeOcupacion < 40 ? "bg-amber-600" : "bg-secondary";
+                            <div class="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/60">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="font-bold text-on-surface">@s.Nombre <span class="text-outline font-normal">(@s.InsumoPrincipal)</span></span>
+                                    <span class="font-bold tabular-nums">@s.NivelActualKg.ToString("N0") / @s.CapacidadMaximaKg.ToString("N0") Kg (@s.PorcentajeOcupacion%)</span>
+                                </div>
+                                <div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden mt-1.5">
+                                    <div class="h-full @barCls rounded-full" style="width: @Math.Min(100, Math.Max(0, s.PorcentajeOcupacion))%;"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+    </div>
+
+    <!-- Sincronización Móvil de Tareas/Labores y Alertas -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
+            <div class="flex items-center justify-between">
+                <h2 class="font-headline text-sm font-extrabold text-on-surface">Tareas y Labores de Campo (Hoy)</h2>
+                <a href="/Calendario" class="text-xs font-bold text-primary hover:underline">Abrir monitor &rarr;</a>
+            </div>
+            @if (Model.Data.TareasHoy.Count == 0)
+            {
+                <p class="text-xs text-on-surface-variant py-4 text-center bg-surface-container-low rounded-xl">
+                    Sin tareas ni labores sincronizadas para el día de hoy.
+                </p>
+            }
+            else
+            {
+                <div class="flex flex-col gap-2">
+                    @foreach (var t in Model.Data.TareasHoy.Take(6))
+                    {
+                        <div class="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-outline-variant/70 bg-surface-container-low/40 text-xs">
+                            <div class="min-w-0">
+                                <div class="font-bold text-on-surface truncate">@t.Titulo</div>
+                                <div class="text-[11px] text-on-surface-variant truncate">@t.HoraProgramada • @t.GalponNombre @t.LoteCodigo • @t.AsignadoANombre</div>
+                            </div>
+                            <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border @(t.EstaCompletada ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-amber-100 text-amber-800 border-amber-300")">
+                                @(t.EstaCompletada ? "Completada" : "Pendiente")
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
+            <div class="flex items-center justify-between">
+                <h2 class="font-headline text-sm font-extrabold text-on-surface">Alertas Lógicas &amp; Sanitarias</h2>
+                <span class="text-[11px] font-bold text-on-surface-variant">@Model.Data.Alertas.Count activas</span>
+            </div>
+            @if (Model.Data.Alertas.Count == 0)
+            {
+                <p class="text-xs text-emerald-800 font-semibold py-4 text-center bg-emerald-50 rounded-xl border border-emerald-200">
+                    Sin desviaciones críticas ni alertas pendientes en granja.
+                </p>
+            }
+            else
+            {
+                <div class="flex flex-col gap-2">
+                    @foreach (var a in Model.Data.Alertas.Take(6))
+                    {
+                        var cls = a.Severidad == "critica"
+                            ? "bg-red-50 border-red-200 text-red-900"
+                            : "bg-amber-50 border-amber-200 text-amber-900";
+                        <div class="p-2.5 rounded-xl border @cls text-xs flex items-start justify-between gap-2">
+                            <div>
+                                <div class="font-bold">@a.Tipo</div>
+                                <div class="text-[11px] opacity-90">@a.Descripcion</div>
+                            </div>
+                            <span class="shrink-0 font-bold tabular-nums text-[11px]">@a.ValorDetectado</span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@section Scripts {
+    @if (RoleService.EsAdmin)
+    {
+        <script>
+            const TASA_CAMBIO = 36.80;
+            const centrosData = @Html.Raw(centrosJson);
+            const flujoData = @Html.Raw(flujoJson);
+            let chartCentros = null;
+            let chartFlujo = null;
+            let monedaActiva = 'USD';
+
+            function factorMoneda() { return monedaActiva === 'NIO' ? TASA_CAMBIO : 1; }
+            function simboloMoneda() { return monedaActiva === 'NIO' ? 'C$ ' : '$ '; }
+
+            function setMonedaConsola(moneda) {
+                monedaActiva = moneda;
+                const btnUsd = document.getElementById('btn-moneda-usd');
+                const btnNio = document.getElementById('btn-moneda-nio');
+                if (moneda === 'USD') {
+                    btnUsd.className = 'px-3 py-1.5 rounded-lg bg-primary text-on-primary transition-all';
+                    btnNio.className = 'px-3 py-1.5 rounded-lg text-on-surface-variant hover:text-on-surface transition-all';
+                } else {
+                    btnNio.className = 'px-3 py-1.5 rounded-lg bg-primary text-on-primary transition-all';
+                    btnUsd.className = 'px-3 py-1.5 rounded-lg text-on-surface-variant hover:text-on-surface transition-all';
+                }
+
+                const mult = factorMoneda();
+                const sym = simboloMoneda();
+                document.querySelectorAll('.money-usd').forEach(el => {
+                    const usd = parseFloat(el.dataset.usd || '0') || 0;
+                    el.textContent = sym + (usd * mult).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                });
+
+                renderCharts();
+            }
+
+            function renderCharts() {
+                const mult = factorMoneda();
+                const sym = simboloMoneda();
+
+                const ctxCentros = document.getElementById('chart-centros');
+                if (ctxCentros && centrosData.length > 0) {
+                    if (chartCentros) chartCentros.destroy();
+                    chartCentros = new Chart(ctxCentros, {
+                        type: 'bar',
+                        data: {
+                            labels: centrosData.map(c => c.Nombre),
+                            datasets: [
+                                {
+                                    label: 'Presupuestado',
+                                    data: centrosData.map(c => Number((c.PresupuestadoUsd * mult).toFixed(2))),
+                                    backgroundColor: '#becca3',
+                                    borderRadius: 6
+                                },
+                                {
+                                    label: 'Ejecutado',
+                                    data: centrosData.map(c => Number((c.EjecutadoUsd * mult).toFixed(2))),
+                                    backgroundColor: '#566342',
+                                    borderRadius: 6
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'bottom' },
+                                tooltip: { callbacks: { label: c => `${c.dataset.label}: ${sym}${Number(c.raw).toLocaleString('en-US', { minimumFractionDigits: 2 })}` } }
+                            }
+                        }
+                    });
+                }
+
+                const ctxFlujo = document.getElementById('chart-flujo');
+                if (ctxFlujo && flujoData.length > 0) {
+                    if (chartFlujo) chartFlujo.destroy();
+                    chartFlujo = new Chart(ctxFlujo, {
+                        type: 'bar',
+                        data: {
+                            labels: flujoData.map(m => `${m.MesNombre} ${m.Anio}`),
+                            datasets: [
+                                {
+                                    label: 'Ingresos',
+                                    data: flujoData.map(m => Number((m.IngresosUsd * mult).toFixed(2))),
+                                    backgroundColor: '#45664b',
+                                    borderRadius: 6
+                                },
+                                {
+                                    label: 'Gastos',
+                                    data: flujoData.map(m => Number((m.GastosUsd * mult).toFixed(2))),
+                                    backgroundColor: '#ba1a1a',
+                                    borderRadius: 6
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'bottom' },
+                                tooltip: { callbacks: { label: c => `${c.dataset.label}: ${sym}${Number(c.raw).toLocaleString('en-US', { minimumFractionDigits: 2 })}` } }
+                            }
+                        }
+                    });
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', renderCharts);
+        </script>
+    }
+}

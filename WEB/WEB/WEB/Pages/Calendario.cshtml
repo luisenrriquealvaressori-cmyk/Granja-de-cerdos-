@@ -1,0 +1,626 @@
+@page
+@model WEB.Pages.CalendarioModel
+@inject WEB.Services.UserRoleService RoleService
+@{
+    ViewData["Title"] = "Calendario, Tareas & Labores";
+    var data = Model.Data;
+    var fechaActual = data.FechaSeleccionada;
+    var primerDiaMes = new DateTime(data.AnioSeleccionado, data.MesSeleccionado, 1);
+    var diasEnMes = DateTime.DaysInMonth(data.AnioSeleccionado, data.MesSeleccionado);
+    var diaSemanaInicio = ((int)primerDiaMes.DayOfWeek + 6) % 7;
+
+    var nombreMes = new System.Globalization.CultureInfo("es-ES").DateTimeFormat.GetMonthName(data.MesSeleccionado);
+    nombreMes = string.IsNullOrEmpty(nombreMes) ? "" : char.ToUpper(nombreMes[0]) + nombreMes.Substring(1);
+
+    var toastRaw = TempData["Toast"]?.ToString();
+    var toastTipo = "info";
+    var toastMsg = "";
+    if (!string.IsNullOrWhiteSpace(toastRaw))
+    {
+        var idx = toastRaw.IndexOf(':');
+        if (idx > 0)
+        {
+            toastTipo = toastRaw[..idx].Trim().ToLowerInvariant();
+            toastMsg = toastRaw[(idx + 1)..].Trim();
+        }
+        else
+        {
+            toastMsg = toastRaw;
+        }
+    }
+
+    var laboresCampoHoy = data.TareasHorarioDia.Count(t =>
+        (t.TipoActividad ?? "").Contains("labor", StringComparison.OrdinalIgnoreCase) ||
+        (t.TipoActividad ?? "").Contains("mantenimiento", StringComparison.OrdinalIgnoreCase) ||
+        (t.TipoActividad ?? "").Contains("bioseguridad", StringComparison.OrdinalIgnoreCase) ||
+        (t.Descripcion ?? "").Contains("[Móvil", StringComparison.OrdinalIgnoreCase));
+
+    var puedeGestionar = RoleService.EsAdmin || RoleService.EsVeterinario;
+}
+
+<div class="p-4 sm:p-6 space-y-6">
+    <!-- 1. ENCABEZADO -->
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+        <div>
+            <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                <span class="material-symbols-outlined text-[16px]">event_note</span>
+                <span>Coordinación Web ↔ Campo (App Móvil)</span>
+            </div>
+            <h1 class="text-2xl font-bold font-headline text-on-surface tracking-tight">
+                Agenda Operativa, Tareas &amp; Labores de Campo
+            </h1>
+            <p class="text-xs text-on-surface-variant mt-0.5">
+                Supervisión de actividades programadas y labores físicas reportadas offline desde la App Móvil por el equipo.
+            </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            @if (puedeGestionar)
+            {
+                <button type="button" onclick="abrirModalNuevaTarea('@fechaActual.ToString("yyyy-MM-dd")')"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">add_task</span>
+                    <span>Programar Actividad</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    <!-- TOAST FEEDBACK -->
+    @if (!string.IsNullOrWhiteSpace(toastMsg))
+    {
+        var clsToast = toastTipo == "error"
+            ? "bg-error-container/60 border-error text-on-error-container"
+            : toastTipo == "info"
+                ? "bg-blue-50 border-blue-300 text-blue-950"
+                : "bg-emerald-50 border-emerald-300 text-emerald-950";
+        var iconToast = toastTipo == "error" ? "error" : toastTipo == "info" ? "info" : "check_circle";
+        <div class="p-3.5 rounded-xl border @clsToast flex items-center gap-2.5 text-xs font-medium shadow-2xs">
+            <span class="material-symbols-outlined text-[20px]">@iconToast</span>
+            <span>@toastMsg</span>
+        </div>
+    }
+
+    <!-- 2. KPI SUMMARY CARDS -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Total del Día</div>
+            <div class="text-2xl font-bold font-headline text-on-surface mt-1 tabular-nums">@data.TareasHoyTotal</div>
+            <div class="text-[11px] text-outline mt-0.5">Fecha @fechaActual.ToString("dd MMM")</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Pendientes / Curso</div>
+            <div class="text-2xl font-bold font-headline text-amber-700 mt-1 tabular-nums">@data.TareasHoyPendientes</div>
+            <div class="text-[11px] text-outline mt-0.5">Por ejecutar en campo</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Completadas</div>
+            <div class="text-2xl font-bold font-headline text-emerald-700 mt-1 tabular-nums">@data.TareasHoyCompletadas</div>
+            <div class="text-[11px] text-outline mt-0.5">@laboresCampoHoy labor(es) / manejo</div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 shadow-2xs">
+            <div class="text-[11px] font-semibold text-on-surface-variant uppercase">Urgentes / Alertas</div>
+            <div class="text-2xl font-bold font-headline @(data.TareasUrgentes > 0 ? "text-error" : "text-on-surface") mt-1 tabular-nums">@data.TareasUrgentes</div>
+            <div class="text-[11px] text-outline mt-0.5">@data.Notificaciones.Count aviso(s) radar</div>
+        </div>
+    </div>
+
+    <!-- 3. FILTROS GET -->
+    <form method="get" class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-2xs flex flex-wrap items-end gap-3">
+        <input type="hidden" name="Mes" value="@data.MesSeleccionado" />
+        <input type="hidden" name="Anio" value="@data.AnioSeleccionado" />
+
+        <div>
+            <label class="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Fecha</label>
+            <input type="date" name="Fecha" value="@fechaActual.ToString("yyyy-MM-dd")"
+                   class="h-9 px-3 rounded-xl border border-outline-variant text-xs text-on-surface" />
+        </div>
+
+        <div>
+            <label class="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Categoría</label>
+            <select name="Tipo" class="h-9 px-3 rounded-xl border border-outline-variant text-xs text-on-surface">
+                <option value="">Todas</option>
+                <option value="Sanidad" selected="@(Model.Tipo == "Sanidad")">Sanidad &amp; Vacunas</option>
+                <option value="Reproduccion" selected="@(Model.Tipo == "Reproduccion")">Reproducción IA</option>
+                <option value="Alimentacion" selected="@(Model.Tipo == "Alimentacion")">Alimentación / Tolvas</option>
+                <option value="Manejo" selected="@(Model.Tipo == "Manejo")">Manejo &amp; Pesajes</option>
+                <option value="Bioseguridad" selected="@(Model.Tipo == "Bioseguridad")">Bioseguridad / Limpieza</option>
+                <option value="Mantenimiento" selected="@(Model.Tipo == "Mantenimiento")">Mantenimiento / Silos</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Estado</label>
+            <select name="Estado" class="h-9 px-3 rounded-xl border border-outline-variant text-xs text-on-surface">
+                <option value="">Todos</option>
+                <option value="pendiente" selected="@(Model.Estado == "pendiente")">Pendiente</option>
+                <option value="en_progreso" selected="@(Model.Estado == "en_progreso")">En Curso</option>
+                <option value="completada" selected="@(Model.Estado == "completada")">Completada</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Rol</label>
+            <select name="Rol" class="h-9 px-3 rounded-xl border border-outline-variant text-xs text-on-surface">
+                <option value="">Todos</option>
+                <option value="Operario" selected="@(Model.Rol == "Operario")">Operario</option>
+                <option value="Veterinario" selected="@(Model.Rol == "Veterinario")">Veterinario</option>
+                <option value="Administrador" selected="@(Model.Rol == "Administrador")">Administrador</option>
+            </select>
+        </div>
+
+        <button type="submit" class="h-9 px-4 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary transition">
+            Filtrar
+        </button>
+        <a href="/Calendario" class="h-9 px-3 rounded-xl border border-outline-variant text-xs font-semibold text-on-surface-variant hover:text-on-surface inline-flex items-center">
+            Hoy
+        </a>
+    </form>
+
+    <!-- 4. CUADRÍCULA PRINCIPAL -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <!-- COLUMNA IZQUIERDA: HORARIO DEL DÍA & LABORES SINCRONIZADAS (7 Cols) -->
+        <div class="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-2xs">
+            <div class="flex items-center justify-between pb-3 border-b border-outline-variant/60">
+                <div class="flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-xl bg-primary text-on-primary flex items-center justify-center">
+                        <span class="material-symbols-outlined text-[18px]">checklist</span>
+                    </span>
+                    <div>
+                        <h2 class="font-headline font-bold text-base text-on-surface">Cronograma &amp; Labores del @fechaActual.ToString("dd/MM/yyyy")</h2>
+                        <p class="text-[11px] text-on-surface-variant">Incluye tareas planificadas y reportes físicos sincronizados</p>
+                    </div>
+                </div>
+                <span class="text-xs font-bold px-2.5 py-1 rounded-lg bg-surface-container-high text-on-surface font-mono">
+                    @data.TareasHorarioDia.Count
+                </span>
+            </div>
+
+            <div class="mt-4 flex flex-col divide-y divide-outline-variant/40">
+                @if (data.TareasHorarioDia.Count == 0)
+                {
+                    <div class="py-12 text-center space-y-2">
+                        <span class="material-symbols-outlined text-4xl text-outline">event_available</span>
+                        <h3 class="font-headline font-bold text-sm text-on-surface">Sin actividades para esta fecha y filtros</h3>
+                        <p class="text-xs text-on-surface-variant max-w-sm mx-auto">
+                            Los reportes enviados desde la App Móvil o nuevas tareas agendadas aparecerán automáticamente aquí.
+                        </p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var tarea in data.TareasHorarioDia)
+                    {
+                        var esOrigenMovil = (tarea.Descripcion ?? "").Contains("[Móvil", StringComparison.OrdinalIgnoreCase);
+                        <div class="py-3.5 flex flex-col sm:flex-row sm:items-start gap-3 hover:bg-surface-container-low/40 rounded-xl px-2 transition-colors">
+                            <div class="flex sm:flex-col items-center sm:items-start justify-between gap-1.5 shrink-0 sm:w-24">
+                                <div class="flex items-center gap-1 text-xs font-extrabold font-mono text-on-surface">
+                                    <span class="material-symbols-outlined text-[15px] text-primary">schedule</span>
+                                    <span>@tarea.HoraProgramada</span>
+                                </div>
+                                <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border @tarea.ColorBadge">
+                                    <span class="material-symbols-outlined text-[11px]">@tarea.Icono</span>
+                                    @tarea.TipoActividad
+                                </span>
+                                @if (esOrigenMovil)
+                                {
+                                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-50 text-teal-900 border border-teal-200">
+                                        Sync Móvil
+                                    </span>
+                                }
+                            </div>
+
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-start justify-between gap-2 flex-wrap">
+                                    <h4 class="font-headline font-bold text-xs sm:text-sm text-on-surface @(tarea.EstaCompletada ? "line-through text-outline" : "")">
+                                        @tarea.Titulo
+                                    </h4>
+                                    <div class="flex items-center gap-1.5 shrink-0">
+                                        @if (tarea.EsUrgente && !tarea.EstaCompletada)
+                                        {
+                                            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-error-container text-error border border-error/30">
+                                                URGENTE
+                                            </span>
+                                        }
+                                        @if (tarea.EstaCompletada)
+                                        {
+                                            <span class="inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                                <span class="material-symbols-outlined text-[12px]">check_circle</span>
+                                                Completada
+                                            </span>
+                                        }
+                                        else if (tarea.Estado == "en_progreso")
+                                        {
+                                            <span class="inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-300">
+                                                En Curso
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-300">
+                                                Pendiente
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(tarea.Descripcion))
+                                {
+                                    <p class="text-xs text-on-surface-variant mt-1 leading-relaxed">@tarea.Descripcion</p>
+                                }
+
+                                <div class="mt-2 flex items-center gap-3 flex-wrap text-[11px] text-on-surface-variant font-medium">
+                                    @if (!string.IsNullOrWhiteSpace(tarea.GalponNombre))
+                                    {
+                                        <span class="inline-flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px] text-primary">location_on</span>
+                                            <span>@tarea.GalponNombre</span>
+                                        </span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(tarea.LoteCodigo))
+                                    {
+                                        <span class="inline-flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px] text-primary">grid_view</span>
+                                            <span>Lote: <strong>@tarea.LoteCodigo</strong></span>
+                                        </span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(tarea.CerdaCaravana))
+                                    {
+                                        <span class="inline-flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px] text-primary">pets</span>
+                                            <span>Cerda: <strong>@tarea.CerdaCaravana</strong></span>
+                                        </span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(tarea.AsignadoANombre))
+                                    {
+                                        <span class="inline-flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px] text-primary">person</span>
+                                            <span>@tarea.AsignadoANombre (@tarea.AsignadoARol)</span>
+                                        </span>
+                                    }
+                                </div>
+
+                                @if (tarea.EstaCompletada && !string.IsNullOrWhiteSpace(tarea.CompletadoPor))
+                                {
+                                    <div class="mt-1.5 text-[10px] text-emerald-800 font-semibold flex items-center gap-1">
+                                        <span class="material-symbols-outlined text-[13px]">verified</span>
+                                        <span>Cumplida por @tarea.CompletadoPor @(tarea.FechaCompletado.HasValue ? $"({tarea.FechaCompletado.Value:HH:mm})" : "")</span>
+                                    </div>
+                                }
+
+                                <div class="mt-2.5 flex items-center gap-2">
+                                    @if (!tarea.EstaCompletada)
+                                    {
+                                        <form method="post" asp-page-handler="CompletarTarea" class="inline">
+                                            <input type="hidden" name="id" value="@tarea.Id" />
+                                            <input type="hidden" name="Fecha" value="@fechaActual.ToString("yyyy-MM-dd")" />
+                                            <input type="hidden" name="Mes" value="@data.MesSeleccionado" />
+                                            <input type="hidden" name="Anio" value="@data.AnioSeleccionado" />
+                                            <input type="hidden" name="Tipo" value="@Model.Tipo" />
+                                            <input type="hidden" name="Estado" value="@Model.Estado" />
+                                            <input type="hidden" name="Rol" value="@Model.Rol" />
+                                            <button type="submit" class="inline-flex items-center gap-1 bg-emerald-700 hover:bg-emerald-800 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold transition">
+                                                <span class="material-symbols-outlined text-[13px]">check</span>
+                                                <span>Completar</span>
+                                            </button>
+                                        </form>
+
+                                        @if (tarea.Estado != "en_progreso")
+                                        {
+                                            <form method="post" asp-page-handler="IniciarTarea" class="inline">
+                                                <input type="hidden" name="id" value="@tarea.Id" />
+                                                <input type="hidden" name="Fecha" value="@fechaActual.ToString("yyyy-MM-dd")" />
+                                                <input type="hidden" name="Mes" value="@data.MesSeleccionado" />
+                                                <input type="hidden" name="Anio" value="@data.AnioSeleccionado" />
+                                                <input type="hidden" name="Tipo" value="@Model.Tipo" />
+                                                <input type="hidden" name="Estado" value="@Model.Estado" />
+                                                <input type="hidden" name="Rol" value="@Model.Rol" />
+                                                <button type="submit" class="inline-flex items-center gap-1 border border-outline-variant hover:bg-surface-container-low px-2 py-1 rounded-lg text-[11px] font-semibold text-on-surface transition">
+                                                    <span class="material-symbols-outlined text-[13px]">play_arrow</span>
+                                                    <span>Iniciar</span>
+                                                </button>
+                                            </form>
+                                        }
+                                    }
+
+                                    @if (puedeGestionar)
+                                    {
+                                        <form method="post" asp-page-handler="EliminarTarea" onsubmit="return confirm('¿Eliminar esta actividad del cronograma?');" class="inline ml-auto">
+                                            <input type="hidden" name="id" value="@tarea.Id" />
+                                            <input type="hidden" name="Fecha" value="@fechaActual.ToString("yyyy-MM-dd")" />
+                                            <input type="hidden" name="Mes" value="@data.MesSeleccionado" />
+                                            <input type="hidden" name="Anio" value="@data.AnioSeleccionado" />
+                                            <button type="submit" class="p-1 rounded-lg text-outline hover:text-error hover:bg-error-container/30 transition" title="Eliminar">
+                                                <span class="material-symbols-outlined text-[16px]">delete</span>
+                                            </button>
+                                        </form>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+
+        <!-- COLUMNA DERECHA: CALENDARIO MENSUAL + RADAR NOTIFICACIONES (5 Cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+            <div class="p-5 rounded-2xl bg-surface-container-lowest border border-outline-variant shadow-2xs">
+                <div class="flex items-center justify-between pb-3 border-b border-outline-variant/60">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-primary text-[20px]">calendar_today</span>
+                        <h3 class="font-headline font-bold text-sm text-on-surface">@nombreMes @data.AnioSeleccionado</h3>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        @{
+                            var mesAnterior = primerDiaMes.AddMonths(-1);
+                            var mesSiguiente = primerDiaMes.AddMonths(1);
+                        }
+                        <a href="/Calendario?Mes=@mesAnterior.Month&Anio=@mesAnterior.Year&Fecha=@mesAnterior.ToString("yyyy-MM-dd")"
+                           class="p-1 rounded-lg border border-outline-variant hover:bg-surface-container-low transition" title="Mes Anterior">
+                            <span class="material-symbols-outlined text-[16px]">chevron_left</span>
+                        </a>
+                        <a href="/Calendario?Mes=@mesSiguiente.Month&Anio=@mesSiguiente.Year&Fecha=@mesSiguiente.ToString("yyyy-MM-dd")"
+                           class="p-1 rounded-lg border border-outline-variant hover:bg-surface-container-low transition" title="Mes Siguiente">
+                            <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-outline uppercase mt-3 mb-1">
+                    <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
+                </div>
+
+                <div class="grid grid-cols-7 gap-1">
+                    @for (int i = 0; i < diaSemanaInicio; i++)
+                    {
+                        <div class="h-10 rounded-lg bg-surface-container-low/20"></div>
+                    }
+                    @for (int dia = 1; dia <= diasEnMes; dia++)
+                    {
+                        var diaFecha = new DateTime(data.AnioSeleccionado, data.MesSeleccionado, dia);
+                        bool esDiaSeleccionado = diaFecha.Date == fechaActual.Date;
+                        bool esDiaHoy = diaFecha.Date == DateTime.Today;
+                        var tareasEnDia = data.TareasMes.Where(t => t.FechaProgramada.Date == diaFecha.Date).ToList();
+                        int numTareas = tareasEnDia.Count;
+                        bool tieneUrgentes = tareasEnDia.Any(t => t.EsUrgente && !t.EstaCompletada);
+
+                        <a href="/Calendario?Fecha=@diaFecha.ToString("yyyy-MM-dd")&Mes=@data.MesSeleccionado&Anio=@data.AnioSeleccionado"
+                           class="h-10 rounded-xl flex flex-col items-center justify-center relative transition-all @(esDiaSeleccionado ? "bg-primary text-on-primary font-bold shadow-xs scale-105 z-10" : esDiaHoy ? "bg-primary-fixed/50 text-primary font-bold border border-primary/40" : "hover:bg-surface-container-low text-on-surface")">
+                            <span class="text-xs tabular-nums">@dia</span>
+                            @if (numTareas > 0)
+                            {
+                                <div class="flex items-center gap-0.5 mt-0.5">
+                                    <span class="w-1.5 h-1.5 rounded-full @(tieneUrgentes ? "bg-error" : esDiaSeleccionado ? "bg-on-primary" : "bg-primary")"></span>
+                                    @if (numTareas > 1)
+                                    {
+                                        <span class="text-[8px] font-bold leading-none @(esDiaSeleccionado ? "text-on-primary" : "text-primary")">@numTareas</span>
+                                    }
+                                </div>
+                            }
+                        </a>
+                    }
+                </div>
+            </div>
+
+            <!-- Centro de Alertas -->
+            <div class="p-5 rounded-2xl bg-surface-container-lowest border border-outline-variant shadow-2xs">
+                <div class="flex items-center gap-2 pb-3 border-b border-outline-variant/60">
+                    <span class="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-700 flex items-center justify-center">
+                        <span class="material-symbols-outlined text-[18px]">notifications</span>
+                    </span>
+                    <div>
+                        <h3 class="font-headline font-bold text-sm text-on-surface">Radar de Alertas &amp; Notificaciones</h3>
+                        <p class="text-[11px] text-on-surface-variant">Partos inminentes, stock mínimo y retiros activos</p>
+                    </div>
+                </div>
+
+                <div class="mt-3 flex flex-col gap-2.5">
+                    @if (data.Notificaciones.Count == 0)
+                    {
+                        <div class="py-6 text-center text-xs text-outline font-medium">
+                            <span class="material-symbols-outlined text-[24px] block mb-1">check_circle</span>
+                            Sin alertas pendientes en este momento.
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var notif in data.Notificaciones)
+                        {
+                            <div class="p-3 rounded-xl border border-outline-variant/80 bg-surface-container-low/40 flex items-start justify-between gap-3">
+                                <div class="flex items-start gap-2.5 min-w-0">
+                                    <div class="w-7 h-7 rounded-lg @notif.BadgeColor flex items-center justify-center shrink-0 mt-0.5">
+                                        <span class="material-symbols-outlined text-[16px]">@notif.Icono</span>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-bold text-on-surface leading-tight">@notif.Titulo</div>
+                                        <p class="text-[11px] text-on-surface-variant mt-0.5 leading-snug">@notif.Mensaje</p>
+                                        <span class="text-[10px] text-outline mt-1 block">@notif.FechaHora.ToString("dd/MM HH:mm")</span>
+                                    </div>
+                                </div>
+                                @if (notif.Tipo != "reproduccion" && notif.Tipo != "tarea")
+                                {
+                                    <form method="post" asp-page-handler="ResolverNotificacion" class="shrink-0">
+                                        <input type="hidden" name="notifId" value="@notif.Id" />
+                                        <button type="submit" class="p-1 rounded-md text-outline hover:text-emerald-700 hover:bg-emerald-50 transition" title="Marcar como atendida">
+                                            <span class="material-symbols-outlined text-[16px]">check</span>
+                                        </button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: PROGRAMAR ACTIVIDAD -->
+<div id="modal-tarea" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
+    <div class="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-outline-variant p-6 transform transition-all duration-200 scale-95 opacity-0" id="panel-modal-tarea">
+        <div class="flex items-center justify-between pb-3 border-b border-outline-variant">
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-primary text-on-primary flex items-center justify-center shadow-xs">
+                    <span class="material-symbols-outlined text-[20px]">add_task</span>
+                </div>
+                <div>
+                    <h3 class="font-headline font-bold text-base text-on-surface">Programar Nueva Actividad</h3>
+                    <p class="text-xs text-on-surface-variant">Disponible de inmediato en la App Móvil al sincronizar</p>
+                </div>
+            </div>
+            <button type="button" onclick="cerrarModalNuevaTarea()" class="p-1 rounded-lg text-outline hover:text-on-surface">
+                <span class="material-symbols-outlined text-[20px]">close</span>
+            </button>
+        </div>
+
+        <form method="post" asp-page-handler="GuardarTarea" class="mt-4 flex flex-col gap-3.5">
+            <div>
+                <label class="block text-xs font-bold text-on-surface mb-1">Título de la Actividad *</label>
+                <input type="text" name="Titulo" required placeholder="Ej: Vacunación o Limpieza Galpón Norte" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3 focus:ring-primary focus:border-primary" />
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Tipo *</label>
+                    <select name="TipoActividad" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3">
+                        <option value="Sanidad">Sanidad &amp; Vacunas</option>
+                        <option value="Reproduccion">Reproducción &amp; IA</option>
+                        <option value="Alimentacion">Alimentación &amp; Tolvas</option>
+                        <option value="Manejo">Manejo &amp; Pesajes</option>
+                        <option value="Bioseguridad">Bioseguridad &amp; Limpieza</option>
+                        <option value="Mantenimiento">Mantenimiento de Silos / Naves</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Prioridad *</label>
+                    <select name="Prioridad" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3">
+                        <option value="media">Normal (Media)</option>
+                        <option value="alta">Alta</option>
+                        <option value="urgente">Urgente</option>
+                        <option value="baja">Baja</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Fecha Programada *</label>
+                    <input type="date" id="input-fecha-modal" name="FechaProgramada" value="@fechaActual.ToString("yyyy-MM-dd")" required class="w-full rounded-xl border-outline-variant text-xs py-2 px-3" />
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Hora (HH:mm) *</label>
+                    <input type="time" name="HoraProgramada" value="08:00" required class="w-full rounded-xl border-outline-variant text-xs py-2 px-3" />
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Galpón / Área</label>
+                    <select name="GalponNombre" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3">
+                        <option value="">Área General</option>
+                        @foreach (var g in data.GalponesDisponibles)
+                        {
+                            <option value="@g">@g</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Lote Asociado</label>
+                    <select name="LoteCodigo" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3">
+                        <option value="">Sin lote específico</option>
+                        @foreach (var loteCod in data.LotesDisponibles)
+                        {
+                            <option value="@loteCod">@loteCod</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Responsable Asignado</label>
+                    <select name="AsignadoANombre" id="select-operador-modal" onchange="sincronizarRolOperador(this)" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3">
+                        @if (data.OperadoresDisponibles.Count == 0)
+                        {
+                            <option value="">Equipo de Campo</option>
+                        }
+                        @foreach (var op in data.OperadoresDisponibles)
+                        {
+                            var parenIdx = op.LastIndexOf('(');
+                            var opNombre = parenIdx > 0 ? op[..parenIdx].Trim() : op;
+                            var opRol = parenIdx > 0 ? op[(parenIdx + 1)..].TrimEnd(')', ' ') : "Operario";
+                            <option value="@opNombre" data-rol="@opRol">@op</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Rol Responsable</label>
+                    <select name="AsignadoARol" id="select-rol-modal" class="w-full rounded-xl border-outline-variant text-xs py-2 px-3">
+                        <option value="Operario">Operario</option>
+                        <option value="Veterinario">Veterinario</option>
+                        <option value="Administrador">Administrador</option>
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-on-surface mb-1">Protocolo / Instrucciones</label>
+                <textarea name="Descripcion" rows="2" placeholder="Indicaciones de dosis, herramientas o bioseguridad..." class="w-full rounded-xl border-outline-variant text-xs py-2 px-3"></textarea>
+            </div>
+
+            <div class="mt-3 flex items-center justify-end gap-2 pt-3 border-t border-outline-variant/60">
+                <button type="button" onclick="cerrarModalNuevaTarea()" class="px-4 py-2 rounded-xl border border-outline-variant text-xs font-semibold text-on-surface hover:bg-surface-container-low">
+                    Cancelar
+                </button>
+                <button type="submit" class="px-5 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-secondary flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-[16px]">save</span>
+                    <span>Guardar Actividad</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function sincronizarRolOperador(sel) {
+            const opt = sel.options[sel.selectedIndex];
+            const rolRaw = (opt?.dataset?.rol || '').toLowerCase();
+            const selRol = document.getElementById('select-rol-modal');
+            if (!selRol || !rolRaw) return;
+            if (rolRaw.includes('vet')) selRol.value = 'Veterinario';
+            else if (rolRaw.includes('admin')) selRol.value = 'Administrador';
+            else selRol.value = 'Operario';
+        }
+
+        function abrirModalNuevaTarea(fecha) {
+            if (fecha) {
+                const inp = document.getElementById('input-fecha-modal');
+                if (inp) inp.value = fecha;
+            }
+            const opSel = document.getElementById('select-operador-modal');
+            if (opSel) sincronizarRolOperador(opSel);
+
+            const modal = document.getElementById('modal-tarea');
+            const panel = document.getElementById('panel-modal-tarea');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                panel.classList.remove('scale-95', 'opacity-0');
+                panel.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function cerrarModalNuevaTarea() {
+            const modal = document.getElementById('modal-tarea');
+            const panel = document.getElementById('panel-modal-tarea');
+            panel.classList.remove('scale-100', 'opacity-100');
+            panel.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 200);
+        }
+    </script>
+}
