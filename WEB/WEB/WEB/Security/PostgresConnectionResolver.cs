@@ -8,19 +8,45 @@ namespace WEB.Security;
 /// </summary>
 public static class PostgresConnectionResolver
 {
+    public static string? GetRawValue(IConfiguration configuration)
+    {
+        string?[] candidates =
+        {
+            configuration.GetConnectionString("PostgreSQL"),
+            configuration["ConnectionStrings_PostgreSQL"],
+            configuration["DATABASE_URL"],
+            Environment.GetEnvironmentVariable("DATABASE_URL"),
+            Environment.GetEnvironmentVariable("POSTGRES_URL"),
+            Environment.GetEnvironmentVariable("NEON_DATABASE_URL")
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            var cleaned = candidate.Trim();
+            if (cleaned.StartsWith("psql ", StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[5..].Trim();
+            }
+            cleaned = cleaned.Trim('\'', '"', ' ');
+            if (!string.IsNullOrWhiteSpace(cleaned))
+                return cleaned;
+        }
+
+        return null;
+    }
+
+    public static bool IsConfigured(IConfiguration configuration) => GetRawValue(configuration) is not null;
+
     public static string Resolve(IConfiguration configuration)
     {
-        var raw = configuration.GetConnectionString("PostgreSQL")
-                  ?? configuration["DATABASE_URL"]
-                  ?? Environment.GetEnvironmentVariable("DATABASE_URL");
-
+        var raw = GetRawValue(configuration);
         if (string.IsNullOrWhiteSpace(raw))
         {
             throw new InvalidOperationException(
                 "Falta 'ConnectionStrings:PostgreSQL' o 'DATABASE_URL' en user-secrets o variables de entorno.");
         }
 
-        raw = raw.Trim();
         if (!raw.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
             !raw.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
         {
@@ -78,8 +104,7 @@ public static class PostgresConnectionResolver
                         csb.ChannelBinding = val switch
                         {
                             "disable" => ChannelBinding.Disable,
-                            "prefer" => ChannelBinding.Prefer,
-                            "require" => ChannelBinding.Require,
+                            "prefer" or "require" => ChannelBinding.Prefer,
                             _ => csb.ChannelBinding
                         };
                         break;

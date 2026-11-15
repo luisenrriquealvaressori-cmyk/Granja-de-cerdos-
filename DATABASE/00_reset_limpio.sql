@@ -878,8 +878,8 @@ CROSS JOIN (SELECT id FROM categorias_insumos WHERE codigo = 'MED' LIMIT 1) c
 ON CONFLICT (codigo_sku) DO NOTHING;
 
 -- ----------------------------------------------------------------------------
--- 5. USUARIOS CANÓNICOS DE ACCESO (ADMIN, VET, OPERARIO)
--- Contraseña unificada para los tres:  Prueba#2026
+-- 5. USUARIOS DE ACCESO INICIALES (ADMIN, VETERINARIO, OPERARIO)
+-- Cuentas operativas listas para ingreso web y app móvil
 -- ----------------------------------------------------------------------------
 
 INSERT INTO usuarios_operadores
@@ -895,10 +895,37 @@ VALUES
 
     ('d0000000-0000-0000-0000-0000000000a3', 'a0000000-0000-0000-0000-000000000001',
      'operario', 'Operario', 'operario@agropig.com',
-     crypt('Prueba#2026', gen_salt('bf', 10)), 'operario_galpon', NULL, TRUE, FALSE)
-ON CONFLICT (id) DO UPDATE
-SET nombre_usuario         = EXCLUDED.nombre_usuario,
-    nombre                 = EXCLUDED.nombre,
+     crypt('Prueba#2026', gen_salt('bf', 10)), 'operario_galpon', NULL, TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000a4', 'a0000000-0000-0000-0000-000000000001',
+     'luisenrique', 'Luis Enrique (Administrador)', 'luisenrique@granjasanjose.com',
+     crypt('LuisAdmin2026', gen_salt('bf', 10)), 'administrador_financiero', 'DIR-002', TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000a5', 'a0000000-0000-0000-0000-000000000001',
+     'gerente', 'Gerencia General', 'gerencia@granjasanjose.com',
+     crypt('Granja2026', gen_salt('bf', 10)), 'administrador_financiero', 'DIR-003', TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000a6', 'a0000000-0000-0000-0000-000000000001',
+     'luis', 'Luis Admin', 'luis@agropig.com',
+     crypt('Prueba#2026', gen_salt('bf', 10)), 'administrador_financiero', 'DIR-004', TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000a7', 'a0000000-0000-0000-0000-000000000001',
+     'junior', 'Junior MVZ', 'veterinaria@agropig.com',
+     crypt('Prueba#2026', gen_salt('bf', 10)), 'director_veterinario', 'MVZ-9402', TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000a8', 'a0000000-0000-0000-0000-000000000001',
+     'veterinario', 'Médico Veterinario Titular', 'vet.titular@granjasanjose.com',
+     crypt('VetGranja2026', gen_salt('bf', 10)), 'director_veterinario', 'MVZ-9501', TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000a9', 'a0000000-0000-0000-0000-000000000001',
+     'jorgejr', 'Jorge Jr.', 'operario@agropig.com',
+     crypt('Prueba#2026', gen_salt('bf', 10)), 'operario_galpon', NULL, TRUE, FALSE),
+
+    ('d0000000-0000-0000-0000-0000000000aa', 'a0000000-0000-0000-0000-000000000001',
+     'encargado', 'Encargado de Galpones', 'campo@granjasanjose.com',
+     crypt('Campo2026', gen_salt('bf', 10)), 'operario_galpon', NULL, TRUE, FALSE)
+ON CONFLICT (nombre_usuario) DO UPDATE
+SET nombre                 = EXCLUDED.nombre,
     email                  = EXCLUDED.email,
     password_hash          = EXCLUDED.password_hash,
     rol                    = EXCLUDED.rol,

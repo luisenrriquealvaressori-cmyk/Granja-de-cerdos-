@@ -98,6 +98,10 @@ public class LoginModel : PageModel
                 ErrorMessage = "Correo o contraseña incorrectos.";
                 break;
 
+            case LoginEstado.SinBaseDatos:
+                ErrorMessage = "Falta configurar la base de datos en el servidor: agrega la variable DATABASE_URL en Render (Environment) con tu conector PostgreSQL de Neon.";
+                break;
+
             default:
                 ErrorMessage = "El servicio de autenticación no está disponible. Intenta nuevamente en unos minutos.";
                 break;

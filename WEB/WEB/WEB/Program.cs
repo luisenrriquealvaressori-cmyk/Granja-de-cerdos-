@@ -215,8 +215,13 @@ app.MapRazorPages()
 // ---------------------------------------------------------------------------
 
 // Health check ligero para balanceadores (Render) sin despertar PostgreSQL innecesariamente
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "agropig-web", timestamp = DateTime.UtcNow }))
-   .AllowAnonymous();
+app.MapGet("/healthz", (IConfiguration cfg) => Results.Ok(new
+{
+    status = "ok",
+    service = "agropig-web",
+    dbConfigured = PostgresConnectionResolver.IsConfigured(cfg),
+    timestamp = DateTime.UtcNow
+})).AllowAnonymous();
 
 // Autenticación para la app móvil: devuelve un JWT de corta/media duración
 app.MapPost("/api/v1/auth/login", async (LoginApiRequest req, AuthService auth, JwtTokenService jwt, HttpContext ctx) =>
@@ -238,6 +243,8 @@ app.MapPost("/api/v1/auth/login", async (LoginApiRequest req, AuthService auth, 
             return Results.Json(new { error = "Cuenta bloqueada temporalmente por intentos fallidos.", retryAfterSeconds = (int)(resultado.Espera?.TotalSeconds ?? 600) }, statusCode: StatusCodes.Status429TooManyRequests);
         case LoginEstado.Invalido:
             return Results.Json(new { error = "Credenciales inválidas." }, statusCode: StatusCodes.Status401Unauthorized);
+        case LoginEstado.SinBaseDatos:
+            return Results.Json(new { error = "Falta configurar DATABASE_URL en las variables de entorno del servidor.", code = "DATABASE_URL_MISSING" }, statusCode: StatusCodes.Status503ServiceUnavailable);
         default:
             return Results.Json(new { error = "Servicio de autenticación no disponible." }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }

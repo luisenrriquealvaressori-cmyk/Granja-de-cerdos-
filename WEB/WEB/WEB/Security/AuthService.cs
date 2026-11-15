@@ -4,7 +4,7 @@ namespace WEB.Security;
 
 public record AuthUser(Guid Id, string Nombre, string Email, string Rol, string? Matricula, string? Cargo, Guid? GranjaId, bool DebeCambiarPassword);
 
-public enum LoginEstado { Ok, Invalido, Bloqueado, Error }
+public enum LoginEstado { Ok, Invalido, Bloqueado, SinBaseDatos, Error }
 
 public record LoginResultado(LoginEstado Estado, AuthUser? Usuario = null, TimeSpan? Espera = null);
 
@@ -89,6 +89,11 @@ public class AuthService
     public async Task<LoginResultado> ValidarAsync(string email, string password, string? ip)
     {
         email = (email ?? string.Empty).Trim();
+        if (!PostgresConnectionResolver.IsConfigured(_configuration))
+        {
+            _logger.LogWarning("Intento de login sin DATABASE_URL o ConnectionStrings:PostgreSQL configurado.");
+            return new LoginResultado(LoginEstado.SinBaseDatos);
+        }
         try
         {
             await EnsureSchemaAsync();
