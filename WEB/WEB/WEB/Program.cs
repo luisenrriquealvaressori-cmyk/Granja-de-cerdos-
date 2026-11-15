@@ -3,6 +3,8 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using WEB.Security;
@@ -41,6 +43,17 @@ if (args.Contains("--reset-db"))
 builder.Services.AddRazorPages()
     .AddMvcOptions(o => o.Filters.Add<PoliticaPageFilter>());
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddDataProtection()
+    .SetApplicationName("AgroPig.Web");
+builder.Services.AddSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository, PostgresDataProtectionRepository>();
+builder.Services.AddOptions<KeyManagementOptions>()
+    .Configure<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository>((options, repo) =>
+    {
+        if (PostgresConnectionResolver.IsConfigured(builder.Configuration))
+        {
+            options.XmlRepository = repo;
+        }
+    });
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;

@@ -9,6 +9,7 @@ using WEB.Security;
 namespace WEB.Pages;
 
 [AllowAnonymous]
+[IgnoreAntiforgeryToken]
 public class LoginModel : PageModel
 {
     private readonly AuthService _auth;
