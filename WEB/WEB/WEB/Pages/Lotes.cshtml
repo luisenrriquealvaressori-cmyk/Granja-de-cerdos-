@@ -13,10 +13,10 @@
     <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
             <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-primary-fixed text-on-primary-fixed">
-                Lógica Productiva &amp; Proyección Financiera
+                @(RoleService.EsAdmin ? "Lógica Productiva & Proyección Financiera" : "Lógica Zootécnica & Población de Naves")
             </span>
             <h1 class="font-headline text-xl sm:text-2xl font-extrabold text-on-surface mt-1">
-                Lotes, Simulador de Costes &amp; Galpones
+                @(RoleService.EsAdmin ? "Lotes, Simulador de Costes & Galpones" : "Lotes, Simulador Zootécnico & Galpones")
             </h1>
             <p class="text-xs text-on-surface-variant">
                 Seguimiento de piaras coexistentes, proyección zootécnica a fecha tope e infraestructura real de la granja.
@@ -70,7 +70,7 @@
                 Lotes Coexistentes (@Model.Data.LotesCoexistentes.Count)
             </button>
             <button type="button" onclick="activarTabL('simulador')" id="ltab-btn-simulador" class="px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface">
-                Simulador Lógico &amp; Costes (Fecha Tope)
+                @(RoleService.EsAdmin ? "Simulador Lógico & Costes (Fecha Tope)" : "Simulador Zootécnico (Fecha Tope)")
             </button>
             <button type="button" onclick="activarTabL('infra')" id="ltab-btn-infra" class="px-4 py-2 text-xs font-bold rounded-t-xl text-on-surface-variant hover:text-on-surface">
                 Galpones &amp; Corrales 5×3m (@Model.Data.GalponesTecnicos.Count)
@@ -157,10 +157,13 @@
                         <label class="block font-bold mb-1">Consumo (lb/d)</label>
                         <input id="sim-consumo" type="number" step="0.1" value="@pDef.ConsumoDiarioCerdoLbs.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
                     </div>
-                    <div>
-                        <label class="block font-bold mb-1">Tipo Cambio C$/$</label>
-                        <input id="sim-tc" type="number" step="0.01" value="36.80" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
-                    </div>
+                    @if (RoleService.EsAdmin)
+                    {
+                        <div>
+                            <label class="block font-bold mb-1">Tipo Cambio C$/$</label>
+                            <input id="sim-tc" type="number" step="0.01" value="36.80" class="w-full rounded-lg border border-outline-variant bg-white px-2.5 py-1.5 font-bold" />
+                        </div>
+                    }
                 </div>
 
                 @if (RoleService.EsAdmin)
@@ -190,7 +193,7 @@
                 }
 
                 <button type="button" onclick="ejecutarSimulacion()" class="w-full py-2.5 rounded-xl bg-primary text-on-primary font-bold hover:bg-secondary transition">
-                    Recalcular Proyección Zootécnica y Costes
+                    @(RoleService.EsAdmin ? "Recalcular Proyección Zootécnica y Costes" : "Recalcular Proyección Zootécnica")
                 </button>
             </div>
 
@@ -369,7 +372,7 @@
                 fechaTope: document.getElementById('sim-fecha').value || '',
                 gmdLbs: document.getElementById('sim-gmd').value || '1.8',
                 consumoDiarioLbs: document.getElementById('sim-consumo').value || '5.8',
-                tipoCambio: document.getElementById('sim-tc').value || '36.80'
+                tipoCambio: document.getElementById('sim-tc')?.value || '36.80'
             });
             const elAlim = document.getElementById('sim-precio-alim');
             if (elAlim) {

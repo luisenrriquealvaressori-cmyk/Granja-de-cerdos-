@@ -29,9 +29,20 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.porciapp.data.local.entities.CatGalponEntity
+import com.example.porciapp.data.local.entities.CatHorarioEntity
+import com.example.porciapp.data.local.entities.CatInsumoEntity
+import com.example.porciapp.data.local.entities.CatLaborEntity
+import com.example.porciapp.data.local.entities.CatOperarioEntity
 import com.example.porciapp.data.local.entities.OperacionGastoEntity
 import com.example.porciapp.data.model.UserProfile
+import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.data.repository.CatalogStore
+import com.example.porciapp.ui.components.CatalogChoiceItem
+import com.example.porciapp.ui.components.DatabaseSelectorField
+import com.example.porciapp.ui.components.ScheduleChipSelector
+import com.example.porciapp.ui.components.SearchableCatalogBottomSheet
 import com.example.porciapp.ui.components.TactileButton
 import com.example.porciapp.ui.components.TactileCard
 import com.example.porciapp.ui.components.toDecimalOrNull
@@ -45,7 +56,13 @@ fun FieldOperationsScreen(
     activeProfile: UserProfile,
     onBackClick: () -> Unit,
     onSaveRecord: (OperacionGastoEntity) -> Unit,
-    registrosGuardados: List<OperacionGastoEntity> = emptyList()
+    registrosGuardados: List<OperacionGastoEntity> = emptyList(),
+    galponesCatalog: List<CatGalponEntity> = emptyList(),
+    laboresCatalog: List<CatLaborEntity> = emptyList(),
+    horariosCatalog: List<CatHorarioEntity> = emptyList(),
+    operariosCatalog: List<CatOperarioEntity> = emptyList(),
+    insumosCatalog: List<CatInsumoEntity> = emptyList(),
+    uiPrefs: WorkspaceUiPreferences = WorkspaceUiPreferences.defaultFor(activeProfile.rol)
 ) {
     val context = LocalContext.current
     val catalogState by CatalogStore.get(context).catalog.collectAsState()
@@ -55,23 +72,212 @@ fun FieldOperationsScreen(
     // 0: Labor de Campo / Turno (todos los roles), 1: Gasto Menor (solo Admin)
     var selectedSectionTab by remember(puedeVerCostos) { mutableIntStateOf(0) }
 
-    // Campos de Labor de Campo
-    val laboresDisponibles = remember {
-        listOf(
-            "Limpieza y desinfección de galpón",
-            "Regulación de tolvas y comederos",
-            "Pesaje y loteo de cerdos",
-            "Mantenimiento de bebederos y fosas",
-            "Descarga y estiba de alimento",
-            "Bioseguridad y pediluvios",
-            "Vigilancia y ronda de nave"
+    // Catálogos maestros desde PostgreSQL / SQLite
+    val allLaboresCampo = remember(laboresCatalog, catalogState.labores, activeProfile.rol) {
+        val raw = if (laboresCatalog.isNotEmpty()) {
+            laboresCatalog
+        } else {
+            catalogState.labores.map {
+                CatLaborEntity(
+                    codigo = it.codigo,
+                    nombre = it.nombre,
+                    tipoRegistro = it.tipoRegistro,
+                    categoria = it.categoria,
+                    etapaSugerida = it.etapaSugerida,
+                    galponSugerido = it.galponSugerido,
+                    duracionSugerida = it.duracionSugerida,
+                    tarifaReferenciaNio = it.tarifaReferenciaNio,
+                    centroCostoCodigo = it.centroCostoCodigo,
+                    rolSugerido = it.rolSugerido,
+                    requiereInsumo = it.requiereInsumo
+                )
+            }
+        }
+        raw.filter {
+            it.tipoRegistro == "LABOR_CAMPO" &&
+                (activeProfile.rol != UserRole.OPERARIO || !it.rolSugerido.equals("Veterinario", ignoreCase = true))
+        }
+    }
+
+    val gastosCatalog = remember(laboresCatalog, catalogState.labores) {
+        val raw = if (laboresCatalog.isNotEmpty()) {
+            laboresCatalog
+        } else {
+            catalogState.labores.map {
+                CatLaborEntity(
+                    codigo = it.codigo,
+                    nombre = it.nombre,
+                    tipoRegistro = it.tipoRegistro,
+                    categoria = it.categoria,
+                    etapaSugerida = it.etapaSugerida,
+                    galponSugerido = it.galponSugerido,
+                    duracionSugerida = it.duracionSugerida,
+                    tarifaReferenciaNio = it.tarifaReferenciaNio,
+                    centroCostoCodigo = it.centroCostoCodigo,
+                    rolSugerido = it.rolSugerido,
+                    requiereInsumo = it.requiereInsumo
+                )
+            }
+        }
+        raw.filter { it.tipoRegistro == "GASTO_OPERATIVO" }
+    }
+
+    val ubicacionesItems = remember(galponesCatalog, catalogState.galpones, catalogState.lotes) {
+        val galpones = if (galponesCatalog.isNotEmpty()) {
+            galponesCatalog.map {
+                CatalogChoiceItem(
+                    id = it.nombre,
+                    title = it.nombre,
+                    subtitle = "${it.tipoSistema} • Cap. ${it.capacidad}",
+                    badge = it.codigo,
+                    category = "Galpones"
+                )
+            }
+        } else {
+            catalogState.galpones.map {
+                CatalogChoiceItem(
+                    id = it.nombre,
+                    title = it.nombre,
+                    subtitle = "${it.tipoSistema} • Cap. ${it.capacidad}",
+                    badge = it.codigo,
+                    category = "Galpones"
+                )
+            }
+        }
+        val lotes = catalogState.lotes.map {
+            val tag = "${it.codigo} · ${it.galpon.ifBlank { it.etapa }}"
+            CatalogChoiceItem(
+                id = tag,
+                title = tag,
+                subtitle = "${it.etapa} • ${it.animales} animales",
+                badge = "LOTE",
+                category = "Lotes Activos"
+            )
+        }
+        galpones + lotes + listOf(
+            CatalogChoiceItem(
+                id = "General Granja",
+                title = "General Granja",
+                subtitle = "Toda la instalación y áreas comunes",
+                badge = "GEN",
+                category = "Áreas"
+            )
         )
     }
-    var laborSeleccionada by remember { mutableStateOf(laboresDisponibles.first()) }
-    var detalleLabor by remember { mutableStateOf("") }
-    var galponLoteLabor by remember(catalogState.lotes) {
-        mutableStateOf(catalogState.lotes.firstOrNull()?.let { "${it.codigo} · ${it.galpon}" } ?: "")
+
+    val turnosItems = remember(horariosCatalog, catalogState.horarios) {
+        val raw = if (horariosCatalog.any { it.tipoHorario == "TURNO_JORNADA" }) {
+            horariosCatalog.filter { it.tipoHorario == "TURNO_JORNADA" }.map {
+                CatalogChoiceItem(
+                    id = it.codigo,
+                    title = it.nombre,
+                    subtitle = "${it.horaInicio} - ${it.horaFin}".trim(' ', '-')
+                )
+            }
+        } else {
+            catalogState.horarios.filter { it.tipoHorario == "TURNO_JORNADA" }.map {
+                CatalogChoiceItem(
+                    id = it.codigo,
+                    title = it.nombre,
+                    subtitle = "${it.horaInicio} - ${it.horaFin}".trim(' ', '-')
+                )
+            }
+        }
+        raw.ifEmpty {
+            listOf(
+                CatalogChoiceItem("TUR-MAN", "Turno Mañana", "06:00 - 12:00"),
+                CatalogChoiceItem("TUR-TAR", "Turno Tarde", "12:00 - 18:00")
+            )
+        }
     }
+
+    val bioInsumosItems = remember(insumosCatalog, catalogState.insumosDetalle) {
+        val list = if (insumosCatalog.any { it.categoriaCodigo in listOf("BIO", "KIT") }) {
+            insumosCatalog.filter { it.categoriaCodigo in listOf("BIO", "KIT") }.map {
+                CatalogChoiceItem(
+                    id = it.sku,
+                    title = it.nombre,
+                    subtitle = "${it.stockActual.toInt()} ${it.unidadMedida} disp.",
+                    badge = it.categoriaCodigo,
+                    category = it.categoriaCodigo
+                )
+            }
+        } else {
+            catalogState.insumosDetalle.filter { it.categoriaCodigo in listOf("BIO", "KIT") }.map {
+                CatalogChoiceItem(
+                    id = it.sku,
+                    title = it.nombre,
+                    subtitle = "${it.stockActual.toInt()} ${it.unidadMedida} disp.",
+                    badge = it.categoriaCodigo,
+                    category = it.categoriaCodigo
+                )
+            }
+        }
+        list
+    }
+
+    val operariosItems = remember(operariosCatalog, catalogState.operarios, activeProfile) {
+        val list = if (operariosCatalog.isNotEmpty()) {
+            operariosCatalog.map {
+                CatalogChoiceItem(
+                    id = it.nombre,
+                    title = it.nombre,
+                    subtitle = "${it.rol} • ${it.matricula.ifBlank { it.nombreUsuario }}",
+                    badge = it.rol,
+                    category = it.rol
+                )
+            }
+        } else {
+            catalogState.operarios.map {
+                CatalogChoiceItem(
+                    id = it.nombre,
+                    title = it.nombre,
+                    subtitle = "${it.rol} • ${it.matricula.ifBlank { it.nombreUsuario }}",
+                    badge = it.rol,
+                    category = it.rol
+                )
+            }
+        }
+        if (list.any { it.title.equals(activeProfile.nombre, ignoreCase = true) }) {
+            list
+        } else {
+            listOf(
+                CatalogChoiceItem(
+                    id = activeProfile.nombreCompleto,
+                    title = activeProfile.nombre,
+                    subtitle = "${activeProfile.cargo} • Sesión activa",
+                    badge = activeProfile.rol.titulo,
+                    category = activeProfile.rol.titulo
+                )
+            ) + list
+        }
+    }
+
+    // Estados de Labor de Campo
+    var selectedLaborCode by remember(allLaboresCampo) {
+        mutableStateOf(allLaboresCampo.firstOrNull()?.codigo.orEmpty())
+    }
+    val selectedLaborObj = allLaboresCampo.firstOrNull { it.codigo == selectedLaborCode }
+
+    var galponLoteLabor by remember(ubicacionesItems, uiPrefs.galponPredeterminado) {
+        val pref = uiPrefs.galponPredeterminado.trim()
+        val matched = if (pref.isNotBlank()) {
+            ubicacionesItems.firstOrNull {
+                it.id.contains(pref, ignoreCase = true) || it.badge.equals(pref, ignoreCase = true)
+            }?.id
+        } else null
+        mutableStateOf(matched ?: ubicacionesItems.firstOrNull()?.id ?: "General Granja")
+    }
+    var selectedTurnoCode by remember(turnosItems, uiPrefs.turnoPredeterminado) {
+        val match = turnosItems.firstOrNull { it.id.equals(uiPrefs.turnoPredeterminado, ignoreCase = true) }
+        mutableStateOf(match?.id ?: turnosItems.firstOrNull()?.id.orEmpty())
+    }
+    var selectedResponsable by remember(activeProfile, operariosItems) {
+        val match = operariosItems.firstOrNull { it.title.equals(activeProfile.nombre, ignoreCase = true) }
+        mutableStateOf(match?.id ?: activeProfile.nombreCompleto)
+    }
+    var selectedInsumoSku by remember { mutableStateOf("") }
+    var detalleLabor by remember { mutableStateOf("") }
     val duracionesJornal = remember {
         listOf(
             0.25 to "2h (0.25 j)",
@@ -84,25 +290,42 @@ fun FieldOperationsScreen(
     var montoCordobasLabor by remember { mutableStateOf("") }
     var notasLabor by remember { mutableStateOf("") }
 
-    // Campos de Gasto Menor (solo Administrador)
-    val categoriasGasto = remember {
-        listOf("Sanitario", "Combustible", "Mantenimiento", "Alimentación", "Bioseguridad", "Otros")
+    // Estados de Gasto Menor (solo Administrador)
+    var selectedGastoCode by remember(gastosCatalog) {
+        mutableStateOf(gastosCatalog.firstOrNull()?.codigo.orEmpty())
     }
-    var categoriaGasto by remember { mutableStateOf("Sanitario") }
-    var conceptoGasto by remember { mutableStateOf("") }
-    var galponLoteGasto by remember(catalogState.lotes) {
-        mutableStateOf(catalogState.lotes.firstOrNull()?.let { "${it.codigo} · ${it.galpon}" } ?: "")
+    var usarConceptoPersonalizado by remember { mutableStateOf(false) }
+    var categoriaGasto by remember(gastosCatalog) {
+        mutableStateOf(gastosCatalog.firstOrNull()?.categoria ?: "Mantenimiento")
+    }
+    var conceptoGasto by remember(gastosCatalog) {
+        mutableStateOf(gastosCatalog.firstOrNull()?.nombre.orEmpty())
+    }
+    var galponLoteGasto by remember(ubicacionesItems, uiPrefs.galponPredeterminado) {
+        val pref = uiPrefs.galponPredeterminado.trim()
+        val matched = if (pref.isNotBlank()) {
+            ubicacionesItems.firstOrNull {
+                it.id.contains(pref, ignoreCase = true) || it.badge.equals(pref, ignoreCase = true)
+            }?.id
+        } else null
+        mutableStateOf(matched ?: ubicacionesItems.firstOrNull()?.id ?: "Administración General")
     }
     var montoCordobasGasto by remember { mutableStateOf("") }
     var numeroComprobante by remember { mutableStateOf("") }
     var notasGasto by remember { mutableStateOf("") }
 
-    val galponesFallback = remember {
-        listOf("Maternidad", "Gestación", "Precebo", "Engorde", "Bodega / Silos", "Granja General")
-    }
+    // Hojas modales desde BD
+    var showLaborSheet by remember { mutableStateOf(false) }
+    var showUbicacionLaborSheet by remember { mutableStateOf(false) }
+    var showInsumoSheet by remember { mutableStateOf(false) }
+    var showResponsableSheet by remember { mutableStateOf(false) }
+    var showGastoSheet by remember { mutableStateOf(false) }
+    var showUbicacionGastoSheet by remember { mutableStateOf(false) }
+
     val sdfDisplay = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -111,7 +334,9 @@ fun FieldOperationsScreen(
                             text = if (puedeVerCostos) "Labores & Gastos de Campo" else "Labores de Campo",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = FieldOnSurface
+                            color = FieldOnSurface,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Text(
                             text = if (puedeVerCostos)
@@ -158,13 +383,19 @@ fun FieldOperationsScreen(
         },
         containerColor = FieldBackground
     ) { innerPadding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            contentAlignment = Alignment.TopCenter
         ) {
+            LazyColumn(
+                modifier = Modifier
+                    .widthIn(max = 640.dp)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
             if (puedeVerCostos) {
                 item {
                     Row(
@@ -203,6 +434,26 @@ fun FieldOperationsScreen(
 
             if (selectedSectionTab == 0 || !puedeVerCostos) {
                 item {
+                    val laborItems = remember(allLaboresCampo) {
+                        allLaboresCampo.map { l ->
+                            CatalogChoiceItem(
+                                id = l.codigo,
+                                title = l.nombre,
+                                subtitle = listOfNotNull(
+                                    l.etapaSugerida.takeIf { it.isNotBlank() },
+                                    l.duracionSugerida.takeIf { it.isNotBlank() },
+                                    if (l.requiereInsumo) "Requiere insumo" else null
+                                ).joinToString(" • "),
+                                badge = l.categoria,
+                                category = l.categoria
+                            )
+                        }
+                    }
+                    val insumoSelectedItem = bioInsumosItems.firstOrNull { it.id == selectedInsumoSku }
+                    val responsableSelectedItem = operariosItems.firstOrNull { it.id == selectedResponsable }
+                    val turnoSelectedItem = turnosItems.firstOrNull { it.id == selectedTurnoCode }
+                    val laborDisplayTitle = selectedLaborObj?.nombre.orEmpty()
+
                     TactileCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -216,81 +467,61 @@ fun FieldOperationsScreen(
                                 )
                             }
 
-                            Text(
-                                text = "1. Tipo de labor en nave",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = FieldOnSurfaceVariant
+                            DatabaseSelectorField(
+                                label = "1. LABOR DEL CATÁLOGO (BASE DE DATOS) *",
+                                selectedTitle = laborDisplayTitle,
+                                selectedSubtitle = selectedLaborObj?.let {
+                                    "${it.categoria} • ${it.etapaSugerida.ifBlank { "General" }} • ${it.duracionSugerida}"
+                                }.orEmpty(),
+                                selectedBadge = selectedLaborObj?.categoria.orEmpty(),
+                                placeholder = "Seleccionar labor estándar...",
+                                leadingIcon = Icons.Default.Engineering,
+                                onClick = { showLaborSheet = true }
                             )
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                laboresDisponibles.forEach { labor ->
-                                    FilterChip(
-                                        selected = laborSeleccionada == labor,
-                                        onClick = { laborSeleccionada = labor },
-                                        label = { Text(labor, maxLines = 1) }
-                                    )
-                                }
+                            DatabaseSelectorField(
+                                label = "2. GALPÓN / LOTE DE EJECUCIÓN *",
+                                selectedTitle = galponLoteLabor,
+                                selectedSubtitle = ubicacionesItems.firstOrNull { it.id == galponLoteLabor }?.subtitle.orEmpty(),
+                                selectedBadge = ubicacionesItems.firstOrNull { it.id == galponLoteLabor }?.badge.orEmpty(),
+                                placeholder = "Seleccionar nave o lote...",
+                                leadingIcon = Icons.Default.Apartment,
+                                onClick = { showUbicacionLaborSheet = true }
+                            )
+
+                            ScheduleChipSelector(
+                                label = "3. TURNO / HORARIO DE JORNADA *",
+                                items = turnosItems,
+                                selectedId = selectedTurnoCode,
+                                onSelect = { selectedTurnoCode = it.id }
+                            )
+
+                            DatabaseSelectorField(
+                                label = "4. OPERARIO / RESPONSABLE",
+                                selectedTitle = responsableSelectedItem?.title ?: selectedResponsable,
+                                selectedSubtitle = responsableSelectedItem?.subtitle ?: activeProfile.cargo,
+                                selectedBadge = responsableSelectedItem?.badge ?: activeProfile.rol.titulo,
+                                leadingIcon = Icons.Default.Badge,
+                                compact = true,
+                                enabled = activeProfile.rol != UserRole.OPERARIO || operariosItems.size > 1,
+                                onClick = { showResponsableSheet = true }
+                            )
+
+                            if (selectedLaborObj?.requiereInsumo == true && bioInsumosItems.isNotEmpty()) {
+                                DatabaseSelectorField(
+                                    label = "5. INSUMO BIO / KIT UTILIZADO (OPCIONAL)",
+                                    selectedTitle = insumoSelectedItem?.title.orEmpty(),
+                                    selectedSubtitle = insumoSelectedItem?.subtitle.orEmpty(),
+                                    selectedBadge = insumoSelectedItem?.badge.orEmpty(),
+                                    placeholder = "Seleccionar insumo de inventario...",
+                                    leadingIcon = Icons.Default.MedicalServices,
+                                    compact = true,
+                                    onClick = { showInsumoSheet = true }
+                                )
                             }
 
-                            OutlinedTextField(
-                                value = detalleLabor,
-                                onValueChange = { detalleLabor = it },
-                                label = { Text("Detalle adicional (opcional)") },
-                                placeholder = { Text("Ej. Lavado a presión de 6 parideras...") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
                             Text(
-                                text = "2. Lote o galpón donde se ejecutó",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = FieldOnSurfaceVariant
-                            )
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (catalogState.lotes.isNotEmpty()) {
-                                    catalogState.lotes.forEach { lote ->
-                                        val tag = "${lote.codigo} · ${lote.galpon.ifBlank { lote.etapa }}"
-                                        FilterChip(
-                                            selected = galponLoteLabor == tag,
-                                            onClick = { galponLoteLabor = tag },
-                                            label = { Text(tag, maxLines = 1) }
-                                        )
-                                    }
-                                } else {
-                                    galponesFallback.forEach { g ->
-                                        FilterChip(
-                                            selected = galponLoteLabor == g,
-                                            onClick = { galponLoteLabor = g },
-                                            label = { Text(g, maxLines = 1) }
-                                        )
-                                    }
-                                }
-                            }
-
-                            OutlinedTextField(
-                                value = galponLoteLabor,
-                                onValueChange = { galponLoteLabor = it },
-                                label = { Text("Galpón / Lote / Zona") },
-                                placeholder = { Text("Ej. LOT-ENG-01 o Maternidad") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Text(
-                                text = "3. Duración del trabajo",
+                                text = "DURACIÓN DE LA LABOR:",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = FieldOnSurfaceVariant
@@ -311,21 +542,34 @@ fun FieldOperationsScreen(
                                 }
                             }
 
+                            OutlinedTextField(
+                                value = detalleLabor,
+                                onValueChange = { detalleLabor = it },
+                                label = { Text("Detalle adicional (opcional)") },
+                                placeholder = { Text("Ej. Lavado de 6 parideras...") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
                             if (puedeVerCostos) {
                                 val montoNum = montoCordobasLabor.toDecimalOrNull() ?: 0.0
                                 OutlinedTextField(
                                     value = montoCordobasLabor,
                                     onValueChange = { montoCordobasLabor = it },
-                                    label = { Text("Tarifa / Jornal en C$ (vacío = tarifa estándar)") },
-                                    placeholder = { Text("320.00") },
+                                    label = { Text("Tarifa / Jornal en C$ (vacío = tarifa catálogo)") },
+                                    placeholder = {
+                                        val ref = selectedLaborObj?.tarifaReferenciaNio?.takeIf { it > 0.0 } ?: 320.0
+                                        Text(String.format(Locale.US, "%.2f", ref))
+                                    },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                     singleLine = true,
                                     supportingText = {
+                                        val ref = selectedLaborObj?.tarifaReferenciaNio?.takeIf { it > 0.0 } ?: 320.0
                                         Text(
                                             if (montoNum > 0.0)
                                                 "Equivalente: $${String.format(Locale.US, "%.2f", montoNum / tipoCambio)} USD"
                                             else
-                                                "Al sincronizar la Web imputa tarifa estándar (C$ 320 / jornal)"
+                                                "Tarifa referencia BD: C$ ${String.format(Locale.US, "%.2f", ref)} / jornal"
                                         )
                                     },
                                     modifier = Modifier.fillMaxWidth()
@@ -335,40 +579,54 @@ fun FieldOperationsScreen(
                             OutlinedTextField(
                                 value = notasLabor,
                                 onValueChange = { notasLabor = it },
-                                label = { Text("Observaciones de campo") },
+                                label = { Text("Observaciones de campo (opcional)") },
                                 placeholder = { Text("Novedades en corrales, equipo, etc.") },
                                 minLines = 2,
                                 maxLines = 3,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
+                            val canSaveLabor = laborDisplayTitle.isNotBlank() || detalleLabor.isNotBlank()
                             TactileButton(
                                 text = "Guardar Labor en Turno",
                                 icon = Icons.Default.CheckCircle,
+                                enabled = canSaveLabor,
                                 onClick = {
-                                    val montoC = if (puedeVerCostos) (montoCordobasLabor.toDecimalOrNull() ?: 0.0) else 0.0
+                                    val montoC = if (puedeVerCostos) {
+                                        montoCordobasLabor.toDecimalOrNull()
+                                            ?: selectedLaborObj?.tarifaReferenciaNio?.takeIf { it > 0.0 }
+                                            ?: 0.0
+                                    } else 0.0
+                                    val baseNombre = laborDisplayTitle.ifBlank { "Labor de campo" }
                                     val conceptoFinal = if (detalleLabor.isNotBlank()) {
-                                        "$laborSeleccionada — ${detalleLabor.trim()}"
+                                        "$baseNombre — ${detalleLabor.trim()}"
                                     } else {
-                                        laborSeleccionada
+                                        baseNombre
                                     }
+                                    val notasFinales = listOfNotNull(
+                                        turnoSelectedItem?.let { "Turno: ${it.title}" },
+                                        insumoSelectedItem?.let { "Insumo: ${it.title} (${it.id})" },
+                                        notasLabor.trim().takeIf { it.isNotBlank() }
+                                    ).joinToString(" • ")
+
                                     val entity = OperacionGastoEntity(
                                         tipoRegistro = "LABOR_CAMPO",
                                         concepto = conceptoFinal,
-                                        categoria = "Mano de Obra",
-                                        responsableNombre = activeProfile.nombreCompleto,
+                                        categoria = selectedLaborObj?.categoria ?: "Mano de Obra",
+                                        responsableNombre = selectedResponsable.ifBlank { activeProfile.nombreCompleto },
                                         galponLote = galponLoteLabor.ifBlank { "General Granja" },
                                         montoCordobas = montoC,
                                         montoDolares = if (montoC > 0.0) montoC / tipoCambio else 0.0,
                                         horasOJornal = jornalSeleccionado,
                                         fechaDisplay = sdfDisplay.format(Date()),
-                                        observaciones = notasLabor.trim(),
+                                        observaciones = notasFinales,
                                         sincronizado = false
                                     )
                                     onSaveRecord(entity)
                                     detalleLabor = ""
                                     montoCordobasLabor = ""
                                     notasLabor = ""
+                                    selectedInsumoSku = ""
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -378,6 +636,8 @@ fun FieldOperationsScreen(
             } else {
                 // Tab 1: Gasto Menor (exclusivo Administrador)
                 item {
+                    val selectedGastoObj = gastosCatalog.firstOrNull { it.codigo == selectedGastoCode }
+                    val ubiGastoItem = ubicacionesItems.firstOrNull { it.id == galponLoteGasto }
                     TactileCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -391,62 +651,64 @@ fun FieldOperationsScreen(
                                 )
                             }
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                categoriasGasto.forEach { cat ->
-                                    FilterChip(
-                                        selected = categoriaGasto == cat,
-                                        onClick = { categoriaGasto = cat },
-                                        label = { Text(cat) }
-                                    )
+                            DatabaseSelectorField(
+                                label = "1. CONCEPTO DE GASTO (CATÁLOGO BD) *",
+                                selectedTitle = if (!usarConceptoPersonalizado) selectedGastoObj?.nombre ?: conceptoGasto else "Otro concepto puntual",
+                                selectedSubtitle = if (!usarConceptoPersonalizado && selectedGastoObj != null) {
+                                    "${selectedGastoObj.categoria} • CC: ${selectedGastoObj.centroCostoCodigo.ifBlank { "General" }}"
+                                } else {
+                                    "Ingreso manual extraordinario"
+                                },
+                                selectedBadge = if (!usarConceptoPersonalizado) selectedGastoObj?.categoria ?: categoriaGasto else "MANUAL",
+                                placeholder = "Seleccionar concepto de gasto...",
+                                leadingIcon = Icons.AutoMirrored.Filled.ReceiptLong,
+                                onClick = {
+                                    usarConceptoPersonalizado = false
+                                    showGastoSheet = true
                                 }
-                            }
-
-                            OutlinedTextField(
-                                value = conceptoGasto,
-                                onValueChange = { conceptoGasto = it },
-                                label = { Text("Concepto del gasto *") },
-                                placeholder = { Text("Ej. Repuesto de chupete, combustible generador...") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
                             )
 
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(FieldSurfaceContainerHigh)
+                                    .clickable { usarConceptoPersonalizado = !usarConceptoPersonalizado }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                if (catalogState.lotes.isNotEmpty()) {
-                                    catalogState.lotes.forEach { lote ->
-                                        val tag = "${lote.codigo} · ${lote.galpon.ifBlank { lote.etapa }}"
-                                        FilterChip(
-                                            selected = galponLoteGasto == tag,
-                                            onClick = { galponLoteGasto = tag },
-                                            label = { Text(tag, maxLines = 1) }
-                                        )
-                                    }
-                                } else {
-                                    galponesFallback.forEach { g ->
-                                        FilterChip(
-                                            selected = galponLoteGasto == g,
-                                            onClick = { galponLoteGasto = g },
-                                            label = { Text(g, maxLines = 1) }
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = "Otro concepto puntual (fuera de catálogo)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = FieldOnSurface
+                                )
+                                Switch(
+                                    checked = usarConceptoPersonalizado,
+                                    onCheckedChange = { usarConceptoPersonalizado = it }
+                                )
                             }
 
-                            OutlinedTextField(
-                                value = galponLoteGasto,
-                                onValueChange = { galponLoteGasto = it },
-                                label = { Text("Lote o galpón imputado") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            if (usarConceptoPersonalizado) {
+                                OutlinedTextField(
+                                    value = conceptoGasto,
+                                    onValueChange = { conceptoGasto = it },
+                                    label = { Text("Concepto puntual del gasto *") },
+                                    placeholder = { Text("Ej. Repuesto de emergencia...") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            DatabaseSelectorField(
+                                label = "2. GALPÓN / CENTRO DE COSTO *",
+                                selectedTitle = galponLoteGasto,
+                                selectedSubtitle = ubiGastoItem?.subtitle.orEmpty(),
+                                selectedBadge = ubiGastoItem?.badge.orEmpty(),
+                                placeholder = "Seleccionar área o galpón...",
+                                leadingIcon = Icons.Default.Apartment,
+                                onClick = { showUbicacionGastoSheet = true }
                             )
 
                             val gastoNum = montoCordobasGasto.toDecimalOrNull() ?: 0.0
@@ -474,13 +736,23 @@ fun FieldOperationsScreen(
                             OutlinedTextField(
                                 value = notasGasto,
                                 onValueChange = { notasGasto = it },
-                                label = { Text("Observaciones") },
+                                label = { Text("Observaciones (opcional)") },
                                 minLines = 2,
                                 maxLines = 3,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
-                            val valido = conceptoGasto.isNotBlank() && (montoCordobasGasto.toDecimalOrNull() ?: 0.0) > 0.0
+                            val conceptoFinal = if (!usarConceptoPersonalizado) {
+                                selectedGastoObj?.nombre ?: conceptoGasto.trim()
+                            } else {
+                                conceptoGasto.trim()
+                            }
+                            val categoriaFinal = if (!usarConceptoPersonalizado) {
+                                selectedGastoObj?.categoria ?: categoriaGasto
+                            } else {
+                                categoriaGasto
+                            }
+                            val valido = conceptoFinal.isNotBlank() && (montoCordobasGasto.toDecimalOrNull() ?: 0.0) > 0.0
                             TactileButton(
                                 text = "Registrar Gasto Bimonetario",
                                 icon = Icons.Default.Payments,
@@ -489,10 +761,10 @@ fun FieldOperationsScreen(
                                     val montoC = montoCordobasGasto.toDecimalOrNull() ?: 0.0
                                     val entity = OperacionGastoEntity(
                                         tipoRegistro = "GASTO_OPERATIVO",
-                                        concepto = conceptoGasto.trim(),
-                                        categoria = categoriaGasto,
+                                        concepto = conceptoFinal,
+                                        categoria = categoriaFinal,
                                         responsableNombre = activeProfile.nombreCompleto,
-                                        galponLote = galponLoteGasto.ifBlank { "General Granja" },
+                                        galponLote = galponLoteGasto.ifBlank { "Administración General" },
                                         montoCordobas = montoC,
                                         montoDolares = montoC / tipoCambio,
                                         horasOJornal = 0.0,
@@ -502,7 +774,7 @@ fun FieldOperationsScreen(
                                         sincronizado = false
                                     )
                                     onSaveRecord(entity)
-                                    conceptoGasto = ""
+                                    if (usarConceptoPersonalizado) conceptoGasto = ""
                                     montoCordobasGasto = ""
                                     numeroComprobante = ""
                                     notasGasto = ""
@@ -581,7 +853,7 @@ fun FieldOperationsScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = reg.concepto,
                                         style = MaterialTheme.typography.bodyMedium,
@@ -657,5 +929,154 @@ fun FieldOperationsScreen(
                 }
             }
         }
+        }
+    }
+
+    if (showLaborSheet) {
+        val laborItems = allLaboresCampo.map { l ->
+            CatalogChoiceItem(
+                id = l.codigo,
+                title = l.nombre,
+                subtitle = listOfNotNull(
+                    l.etapaSugerida.takeIf { it.isNotBlank() },
+                    l.duracionSugerida.takeIf { it.isNotBlank() },
+                    l.galponSugerido.takeIf { it.isNotBlank() }
+                ).joinToString(" • "),
+                badge = l.categoria,
+                category = l.categoria
+            )
+        }
+        SearchableCatalogBottomSheet(
+            title = "Catálogo de Labores de Campo",
+            subtitle = "Actividades estandarizadas por área y rol",
+            items = laborItems,
+            selectedId = selectedLaborCode,
+            categories = laborItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            emptyMessage = "Sincroniza el catálogo para descargar labores.",
+            onSelect = { item ->
+                selectedLaborCode = item.id
+                val l = allLaboresCampo.firstOrNull { it.codigo == item.id }
+                if (l != null) {
+                    jornalSeleccionado = when {
+                        l.duracionSugerida.contains("0.25") || l.duracionSugerida.contains("2h") -> 0.25
+                        l.duracionSugerida.contains("1.0") || l.duracionSugerida.contains("8h") -> 1.0
+                        l.duracionSugerida.contains("1.5") || l.duracionSugerida.contains("12h") -> 1.5
+                        else -> 0.50
+                    }
+                    if (galponLoteLabor.isBlank() && l.galponSugerido.isNotBlank()) {
+                        galponLoteLabor = ubicacionesItems.firstOrNull {
+                            it.id.contains(l.galponSugerido, ignoreCase = true)
+                        }?.id ?: l.galponSugerido
+                    }
+                    if (!l.requiereInsumo) {
+                        selectedInsumoSku = ""
+                    }
+                }
+                showLaborSheet = false
+            },
+            onDismiss = { showLaborSheet = false }
+        )
+    }
+
+    if (showUbicacionLaborSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Galpón / Lote de Ejecución",
+            subtitle = "Galpones y lotes activos sincronizados",
+            items = ubicacionesItems,
+            selectedId = galponLoteLabor,
+            categories = ubicacionesItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                galponLoteLabor = item.id
+                showUbicacionLaborSheet = false
+            },
+            onDismiss = { showUbicacionLaborSheet = false }
+        )
+    }
+
+    if (showInsumoSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Insumos de Bioseguridad / Kit",
+            subtitle = "Insumos registrados en bodega (BIO / KIT)",
+            items = bioInsumosItems,
+            selectedId = selectedInsumoSku,
+            categories = bioInsumosItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                selectedInsumoSku = item.id
+                showInsumoSheet = false
+            },
+            onDismiss = { showInsumoSheet = false }
+        )
+    }
+
+    if (showResponsableSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Operario / Técnico Responsable",
+            subtitle = "Personal registrado en base de datos",
+            items = operariosItems,
+            selectedId = selectedResponsable,
+            categories = operariosItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                selectedResponsable = item.id
+                showResponsableSheet = false
+            },
+            onDismiss = { showResponsableSheet = false }
+        )
+    }
+
+    if (showGastoSheet) {
+        val gastoItems = gastosCatalog.map { g ->
+            CatalogChoiceItem(
+                id = g.codigo,
+                title = g.nombre,
+                subtitle = "CC: ${g.centroCostoCodigo.ifBlank { "General" }} • Ref: C$ ${String.format(Locale.US, "%.2f", g.tarifaReferenciaNio)}",
+                badge = g.categoria,
+                category = g.categoria
+            )
+        }
+        SearchableCatalogBottomSheet(
+            title = "Catálogo de Conceptos de Gasto",
+            subtitle = "Centros de costo y rubros aprobados",
+            items = gastoItems,
+            selectedId = selectedGastoCode,
+            categories = gastoItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            emptyMessage = "Sincroniza el catálogo o activa 'Otro concepto puntual'.",
+            onSelect = { item ->
+                selectedGastoCode = item.id
+                val g = gastosCatalog.firstOrNull { it.codigo == item.id }
+                if (g != null) {
+                    conceptoGasto = g.nombre
+                    categoriaGasto = g.categoria
+                    if (montoCordobasGasto.isBlank() && g.tarifaReferenciaNio > 0.0) {
+                        montoCordobasGasto = String.format(Locale.US, "%.2f", g.tarifaReferenciaNio)
+                    }
+                }
+                showGastoSheet = false
+            },
+            onDismiss = { showGastoSheet = false }
+        )
+    }
+
+    if (showUbicacionGastoSheet) {
+        val adminArea = listOf(
+            CatalogChoiceItem(
+                id = "Administración General",
+                title = "Administración General",
+                subtitle = "Gastos administrativos centrales de granja",
+                badge = "ADM",
+                category = "Áreas"
+            )
+        ) + ubicacionesItems
+        SearchableCatalogBottomSheet(
+            title = "Imputar Gasto a Galpón / Área",
+            subtitle = "Centro de costo operativo",
+            items = adminArea,
+            selectedId = galponLoteGasto,
+            categories = adminArea.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                galponLoteGasto = item.id
+                showUbicacionGastoSheet = false
+            },
+            onDismiss = { showUbicacionGastoSheet = false }
+        )
     }
 }

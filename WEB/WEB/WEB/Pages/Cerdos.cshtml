@@ -309,13 +309,16 @@
                                     <button type="button" onclick="editarCerdo('@cerdo.Id')" title="Editar datos del cerdo" class="p-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors font-bold">
                                         <span class="material-symbols-outlined text-16px">edit</span>
                                     </button>
-                                    <form method="post" asp-page-handler="EliminarCerdo" onsubmit="return confirm('¿Está seguro de dar de baja el cerdo @cerdo.Crotal? Se liberará el cupo en su jaula.')" class="inline">
-                                        <input type="hidden" name="id" value="@cerdo.Id" />
-                                        <input type="hidden" name="crotal" value="@cerdo.Crotal" />
-                                        <button type="submit" title="Dar de baja" class="p-1.5 rounded-lg border border-outline-variant hover:bg-red-50 text-red-700 transition-colors">
-                                            <span class="material-symbols-outlined text-16px">delete</span>
-                                        </button>
-                                    </form>
+                                    @if (RoleService.PuedeDarBajaCerdos)
+                                    {
+                                        <form method="post" asp-page-handler="EliminarCerdo" onsubmit="return confirm('¿Está seguro de dar de baja el cerdo @cerdo.Crotal? Se liberará el cupo en su jaula.')" class="inline">
+                                            <input type="hidden" name="id" value="@cerdo.Id" />
+                                            <input type="hidden" name="crotal" value="@cerdo.Crotal" />
+                                            <button type="submit" title="Dar de baja" class="p-1.5 rounded-lg border border-outline-variant hover:bg-red-50 text-red-700 transition-colors">
+                                                <span class="material-symbols-outlined text-16px">delete</span>
+                                            </button>
+                                        </form>
+                                    }
                                 </div>
                             </td>
                         </tr>
@@ -525,14 +528,24 @@
 
                 <!-- Línea Genética -->
                 <div>
-                    <label class="block text-xs font-bold text-on-surface mb-1">Línea Genética / Raza: *</label>
+                    <label class="block text-xs font-bold text-on-surface mb-1">Línea Genética / Raza (BD): *</label>
                     <select name="LineaGenetica" id="input-cerdo-genetica" class="w-full px-3 py-2 text-xs rounded-lg border border-outline-variant bg-surface-container-lowest font-medium focus:outline-none focus:border-primary">
-                        <option value="Topigs Norsvin 70">Topigs Norsvin TN70 (Excelente Prolificidad)</option>
-                        <option value="Pietrain Belga">Pietrain Belga (Alto Rendimiento Magro)</option>
-                        <option value="Duroc Talent">Duroc Talent (Calidad de Carne &amp; Vigor)</option>
-                        <option value="Landrace DanBred">Landrace DanBred (Maternal Danés)</option>
-                        <option value="Large White">Large White (Habilidad Materna)</option>
-                        <option value="Pietrain x Duroc">Cruce Terminal Pietrain x Duroc</option>
+                        @if (Model.Catalogos.LineasGeneticas.Count > 0)
+                        {
+                            @foreach (var lin in Model.Catalogos.LineasGeneticas)
+                            {
+                                <option value="@lin">@lin</option>
+                            }
+                        }
+                        else
+                        {
+                            <option value="Topigs Norsvin 70">Topigs Norsvin TN70 (Excelente Prolificidad)</option>
+                            <option value="Pietrain Belga">Pietrain Belga (Alto Rendimiento Magro)</option>
+                            <option value="Duroc Talent">Duroc Talent (Calidad de Carne &amp; Vigor)</option>
+                            <option value="Landrace DanBred">Landrace DanBred (Maternal Danés)</option>
+                            <option value="Large White">Large White (Habilidad Materna)</option>
+                            <option value="Pietrain x Duroc">Cruce Terminal Pietrain x Duroc</option>
+                        }
                     </select>
                 </div>
 
@@ -835,7 +848,8 @@
         document.getElementById("input-cerdo-sexo").value = "Hembra";
         document.getElementById("input-cerdo-fechanac").value = new Date().toISOString().split("T")[0];
         document.getElementById("input-cerdo-peso").value = "1.5";
-        document.getElementById("input-cerdo-genetica").value = "Topigs Norsvin 70";
+        const selGen = document.getElementById("input-cerdo-genetica");
+        if (selGen && selGen.options.length > 0) selGen.selectedIndex = 0;
         document.getElementById("input-cerdo-jaula").value = "";
         document.getElementById("input-cerdo-sanitario").value = "Saludable";
         document.getElementById("input-cerdo-obs").value = "";

@@ -40,7 +40,7 @@ public class ComprasModel : PageModel
             return RedirectToPage("/Inventario");
         }
 
-        Data = await _dataService.GetComprasDataAsync();
+        Data = await _dataService.GetComprasDataAsync(incluirCostos: _roleService.EsAdmin);
         return Page();
     }
 
@@ -101,7 +101,7 @@ public class ComprasModel : PageModel
         return RedirectToPage(new { tab = "ordenes" });
     }
 
-    [RequierePolitica(Policies.ComprasGestionar)]
+    [RequierePolitica(Policies.InventarioGestionar)]
     public async Task<IActionResult> OnPostGuardarProveedorAsync([FromForm] CrearProveedorInput input)
     {
         if (string.IsNullOrWhiteSpace(input.NombreComercial))
@@ -127,7 +127,7 @@ public class ComprasModel : PageModel
         return RedirectToPage(new { tab = "proveedores" });
     }
 
-    [RequierePolitica(Policies.ComprasGestionar)]
+    [RequierePolitica(Policies.InventarioGestionar)]
     public async Task<IActionResult> OnPostGuardarProductoAsync([FromForm] GuardarProductoCatalogoInput input)
     {
         if (input.ProveedorId == Guid.Empty || string.IsNullOrWhiteSpace(input.NombreProducto))

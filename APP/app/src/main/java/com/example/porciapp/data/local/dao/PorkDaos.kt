@@ -20,6 +20,12 @@ interface CerdoDao {
 
     @Query("UPDATE cerdos SET sincronizado = 1 WHERE id = :id")
     suspend fun markSynced(id: String)
+
+    @Query("SELECT * FROM cerdos WHERE sincronizado = 0")
+    suspend fun getUnsynced(): List<CerdoEntity>
+
+    @Query("DELETE FROM cerdos WHERE sincronizado = 1")
+    suspend fun deleteSynced()
 }
 
 @Dao
@@ -117,6 +123,9 @@ interface TareaDao {
     /** Tareas de demostración sembradas por versiones anteriores de la app (ids no GUID). */
     @Query("DELETE FROM tareas WHERE id LIKE 'TASK-%'")
     suspend fun deleteLegacySeed()
+
+    @Query("DELETE FROM tareas WHERE sincronizado = 1")
+    suspend fun deleteSynced()
 }
 
 @Dao
@@ -150,6 +159,9 @@ interface NotificacionDao {
 
     @Query("UPDATE notificaciones SET leida = 1 WHERE id = :id")
     suspend fun marcarLeida(id: String)
+
+    @Query("DELETE FROM notificaciones")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -201,6 +213,9 @@ interface SyncQueueDao {
 
     @Query("DELETE FROM sync_queue WHERE recordId LIKE 'TASK-%'")
     suspend fun deleteLegacyTaskItems()
+
+    @Query("DELETE FROM sync_queue WHERE status = 'FAILED'")
+    suspend fun deleteFailed()
 }
 
 @Dao
@@ -225,4 +240,112 @@ interface OperacionGastoDao {
 
     @Query("SELECT COALESCE(SUM(montoDolares), 0.0) FROM operaciones_gastos_campo")
     suspend fun sumTotalDolares(): Double
+
+    @Query("DELETE FROM operaciones_gastos_campo WHERE sincronizado = 1")
+    suspend fun deleteSynced()
+}
+
+@Dao
+interface MasterCatalogDao {
+    @Query("SELECT * FROM cat_galpones ORDER BY codigo ASC")
+    fun getGalponesFlow(): Flow<List<CatGalponEntity>>
+
+    @Query("SELECT * FROM cat_jaulas ORDER BY galponCodigo ASC, codigo ASC")
+    fun getJaulasFlow(): Flow<List<CatJaulaEntity>>
+
+    @Query("SELECT * FROM cat_insumos ORDER BY categoriaCodigo ASC, nombre ASC")
+    fun getInsumosFlow(): Flow<List<CatInsumoEntity>>
+
+    @Query("SELECT * FROM cat_labores ORDER BY tipoRegistro ASC, nombre ASC")
+    fun getLaboresFlow(): Flow<List<CatLaborEntity>>
+
+    @Query("SELECT * FROM cat_horarios ORDER BY horaInicio ASC, codigo ASC")
+    fun getHorariosFlow(): Flow<List<CatHorarioEntity>>
+
+    @Query("SELECT * FROM cat_operarios ORDER BY nombre ASC")
+    fun getOperariosFlow(): Flow<List<CatOperarioEntity>>
+
+    @Query("SELECT * FROM cat_clinico ORDER BY tipoCatalogo ASC, codigo ASC")
+    fun getClinicosFlow(): Flow<List<CatClinicoEntity>>
+
+    @Query("SELECT * FROM preferencias_ui_usuario WHERE userKey = :userKey LIMIT 1")
+    fun getPreferenciaFlow(userKey: String): Flow<PreferenciaUiEntity?>
+
+    @Query("SELECT * FROM preferencias_ui_usuario WHERE userKey = :userKey LIMIT 1")
+    suspend fun getPreferenciaSync(userKey: String): PreferenciaUiEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun savePreferenciaUi(pref: PreferenciaUiEntity)
+
+    @Query("DELETE FROM cat_galpones")
+    suspend fun clearGalpones()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGalpones(items: List<CatGalponEntity>)
+
+    @Query("DELETE FROM cat_jaulas")
+    suspend fun clearJaulas()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertJaulas(items: List<CatJaulaEntity>)
+
+    @Query("DELETE FROM cat_insumos")
+    suspend fun clearInsumos()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertInsumos(items: List<CatInsumoEntity>)
+
+    @Query("DELETE FROM cat_labores")
+    suspend fun clearLabores()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLabores(items: List<CatLaborEntity>)
+
+    @Query("DELETE FROM cat_horarios")
+    suspend fun clearHorarios()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHorarios(items: List<CatHorarioEntity>)
+
+    @Query("DELETE FROM cat_operarios")
+    suspend fun clearOperarios()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOperarios(items: List<CatOperarioEntity>)
+
+    @Query("DELETE FROM cat_clinico")
+    suspend fun clearClinicos()
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertClinicos(items: List<CatClinicoEntity>)
+
+    @Transaction
+    suspend fun clearAllCatalogs() {
+        clearGalpones()
+        clearJaulas()
+        clearInsumos()
+        clearLabores()
+        clearHorarios()
+        clearOperarios()
+        clearClinicos()
+    }
+
+    @Transaction
+    suspend fun replaceMasterCatalogs(
+        galpones: List<CatGalponEntity>,
+        jaulas: List<CatJaulaEntity>,
+        insumos: List<CatInsumoEntity>,
+        labores: List<CatLaborEntity>,
+        horarios: List<CatHorarioEntity>,
+        operarios: List<CatOperarioEntity>,
+        clinicos: List<CatClinicoEntity>
+    ) {
+        clearGalpones()
+        if (galpones.isNotEmpty()) insertGalpones(galpones)
+        clearJaulas()
+        if (jaulas.isNotEmpty()) insertJaulas(jaulas)
+        clearInsumos()
+        if (insumos.isNotEmpty()) insertInsumos(insumos)
+        clearLabores()
+        if (labores.isNotEmpty()) insertLabores(labores)
+        clearHorarios()
+        if (horarios.isNotEmpty()) insertHorarios(horarios)
+        clearOperarios()
+        if (operarios.isNotEmpty()) insertOperarios(operarios)
+        clearClinicos()
+        if (clinicos.isNotEmpty()) insertClinicos(clinicos)
+    }
 }

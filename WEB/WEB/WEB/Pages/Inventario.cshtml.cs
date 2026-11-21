@@ -17,6 +17,7 @@ public class InventarioModel : PageModel
     }
 
     public InventarioPageViewModel Data { get; set; } = new();
+    public CatalogosFormularioWebViewModel Catalogos { get; set; } = new();
 
     [TempData]
     public string? MensajeExito { get; set; }
@@ -26,7 +27,8 @@ public class InventarioModel : PageModel
 
     public async Task OnGetAsync()
     {
-        Data = await _dataService.GetInventarioDataAsync();
+        Data = await _dataService.GetInventarioDataAsync(_roleService.CurrentRoleName);
+        Catalogos = await _dataService.GetCatalogosFormularioWebAsync();
     }
 
     // CRUD: Crear nuevo insumo o alimento
@@ -125,7 +127,7 @@ public class InventarioModel : PageModel
         return RedirectToPage();
     }
 
-    // Kardex: Registrar entrada de insumo
+    // Kardex: Registrar entrada física o valorada de insumo (Operario sin precio; Admin con costo real)
     [RequierePolitica(Policies.KardexRegistrar)]
     public async Task<IActionResult> OnPostRegistrarEntradaAsync(
         [FromForm] string sku,
@@ -136,13 +138,19 @@ public class InventarioModel : PageModel
         [FromForm] decimal costoUnitario,
         [FromForm] string destino)
     {
-        if (cantidad <= 0 || costoUnitario <= 0)
+        decimal costoEfectivo = _roleService.EsAdmin
+            ? costoUnitario
+            : await _dataService.GetCostoPromedioInsumoPorSkuAsync(sku);
+
+        if (cantidad <= 0 || (_roleService.EsAdmin && costoEfectivo <= 0))
         {
-            MensajeError = "Cantidad y costo unitario deben ser superiores a cero.";
+            MensajeError = _roleService.EsAdmin
+                ? "Cantidad y costo unitario deben ser superiores a cero."
+                : "La cantidad ingresada debe ser superior a cero.";
             return RedirectToPage();
         }
 
-        await _dataService.RegistrarEntradaKardexAsync(sku, nombre, categoria, unidad, cantidad, costoUnitario, destino);
+        await _dataService.RegistrarEntradaKardexAsync(sku, nombre, categoria, unidad, cantidad, costoEfectivo, destino);
 
         MensajeExito = $"Entrada de {cantidad:N0} {unidad} de '{nombre}' registrada exitosamente en Kardex PostgreSQL.";
         return RedirectToPage();

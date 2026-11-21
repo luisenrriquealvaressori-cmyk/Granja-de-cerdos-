@@ -316,8 +316,19 @@
                 </select>
             </div>
             <div>
-                <label class="block font-bold mb-1">Nombre del Rubro *</label>
-                <input type="text" name="rubroNombre" required placeholder="Ej. Alimento Engorde Fase 1" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+                <label class="block font-bold mb-1">Nombre del Rubro (Catálogo BD) *</label>
+                <select id="select-rubro-nombre" onchange="sincronizarRubroNombre(this)" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                    @foreach (var gc in Model.Catalogos.GastosConceptos)
+                    {
+                        <option value="@gc.Nombre">@gc.Nombre (@gc.Categoria)</option>
+                    }
+                    @foreach (var lb in Model.Catalogos.Labores)
+                    {
+                        <option value="@lb.Nombre">@lb.Nombre — Labor</option>
+                    }
+                    <option value="__CUSTOM__">+ Otro rubro personalizado...</option>
+                </select>
+                <input type="text" name="rubroNombre" id="input-rubro-nombre" required value="@(Model.Catalogos.GastosConceptos.FirstOrDefault()?.Nombre ?? Model.Catalogos.Labores.FirstOrDefault()?.Nombre ?? "Alimento Balanceado")" placeholder="Nombre específico del rubro" class="hidden mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
             </div>
             <div>
                 <label class="block font-bold mb-1">Monto Estimado (USD $) *</label>
@@ -398,13 +409,36 @@
                 </div>
             </div>
             <div>
-                <label class="block font-bold mb-1">Concepto *</label>
-                <input type="text" name="concepto" required placeholder="Ej. Recibo energía eléctrica nave engorde" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+                <label class="block font-bold mb-1">Concepto / Labor (Catálogo BD) *</label>
+                <select id="select-gasto-concepto" onchange="sincronizarConceptoGasto(this)" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                    @foreach (var gc in Model.Catalogos.GastosConceptos)
+                    {
+                        var usdRef = Math.Round(gc.TarifaReferenciaNio / 36.80m, 2);
+                        <option value="@gc.Nombre" data-monto="@usdRef.ToString(System.Globalization.CultureInfo.InvariantCulture)">@gc.Nombre — $@usdRef.ToString("N2") USD</option>
+                    }
+                    @foreach (var lb in Model.Catalogos.Labores)
+                    {
+                        var usdRef = Math.Round(lb.TarifaReferenciaNio / 36.80m, 2);
+                        <option value="@lb.Nombre" data-monto="@usdRef.ToString(System.Globalization.CultureInfo.InvariantCulture)">[Jornal/Labor] @lb.Nombre — $@usdRef.ToString("N2") USD</option>
+                    }
+                    <option value="__CUSTOM__">+ Otro concepto personalizado...</option>
+                </select>
+                <input type="text" name="concepto" id="input-gasto-concepto" required value="@(Model.Catalogos.GastosConceptos.FirstOrDefault()?.Nombre ?? Model.Catalogos.Labores.FirstOrDefault()?.Nombre ?? "Operación de campo")" placeholder="Descripción específica del gasto" class="hidden mt-1.5 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
             </div>
             <div class="grid grid-cols-2 gap-2">
                 <div>
-                    <label class="block font-bold mb-1">Proveedor / Responsable</label>
-                    <input type="text" name="proveedor" value="Granja San José" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2" />
+                    <label class="block font-bold mb-1">Proveedor / Responsable (BD)</label>
+                    <select name="proveedor" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        <option value="Granja San José">Granja San José</option>
+                        @foreach (var prv in Model.Catalogos.Proveedores)
+                        {
+                            <option value="@prv">@prv (Proveedor)</option>
+                        }
+                        @foreach (var op in Model.Catalogos.Operadores)
+                        {
+                            <option value="@op.Nombre">@op.Nombre (@op.Rol)</option>
+                        }
+                    </select>
                 </div>
                 <div>
                     <label class="block font-bold mb-1">Fecha *</label>
@@ -413,7 +447,7 @@
             </div>
             <div>
                 <label class="block font-bold mb-1">Monto (USD $) *</label>
-                <input type="number" step="0.01" min="0.01" name="monto" required oninput="document.getElementById('gasto-nio-hint').textContent='Equivalente: C$ ' + ((parseFloat(this.value)||0)*36.80).toFixed(2)" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
+                <input type="number" step="0.01" min="0.01" name="monto" id="input-gasto-monto" required oninput="document.getElementById('gasto-nio-hint').textContent='Equivalente: C$ ' + ((parseFloat(this.value)||0)*36.80).toFixed(2)" class="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 font-bold" />
                 <span id="gasto-nio-hint" class="text-[11px] text-outline mt-0.5 block">Equivalente: C$ 0.00</span>
             </div>
             <div class="flex justify-end gap-2 pt-2 border-t border-outline-variant">
@@ -431,8 +465,51 @@
         const pFlujoData = @Html.Raw(flujoJson);
         let pMoneda = 'USD', pChart1 = null, pChart2 = null;
 
-        function abrirModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function abrirModal(id) {
+            document.getElementById(id).style.display = 'flex';
+            if (id === 'modal-rubro') {
+                const sr = document.getElementById('select-rubro-nombre');
+                if (sr) sincronizarRubroNombre(sr);
+            } else if (id === 'modal-gasto') {
+                const sg = document.getElementById('select-gasto-concepto');
+                if (sg) sincronizarConceptoGasto(sg);
+            }
+        }
         function cerrarModal(id) { document.getElementById(id).style.display = 'none'; }
+
+        function sincronizarRubroNombre(sel) {
+            const inp = document.getElementById('input-rubro-nombre');
+            if (!inp) return;
+            if (sel.value === '__CUSTOM__') {
+                inp.classList.remove('hidden');
+                inp.value = '';
+                inp.focus();
+            } else {
+                inp.classList.add('hidden');
+                inp.value = sel.value;
+            }
+        }
+
+        function sincronizarConceptoGasto(sel) {
+            const inp = document.getElementById('input-gasto-concepto');
+            const inpMonto = document.getElementById('input-gasto-monto');
+            const opt = sel.options[sel.selectedIndex];
+            if (!inp) return;
+            if (sel.value === '__CUSTOM__') {
+                inp.classList.remove('hidden');
+                inp.value = '';
+                inp.focus();
+            } else {
+                inp.classList.add('hidden');
+                inp.value = sel.value;
+                const ref = parseFloat(opt?.dataset?.monto || '0');
+                if (inpMonto && ref > 0) {
+                    inpMonto.value = ref.toFixed(2);
+                    const hint = document.getElementById('gasto-nio-hint');
+                    if (hint) hint.textContent = 'Equivalente: C$ ' + (ref * 36.80).toFixed(2);
+                }
+            }
+        }
         function abrirEditarRubro(id, nombre, monto) {
             document.getElementById('edit-rubro-id').value = id;
             document.getElementById('edit-rubro-nombre').value = nombre;

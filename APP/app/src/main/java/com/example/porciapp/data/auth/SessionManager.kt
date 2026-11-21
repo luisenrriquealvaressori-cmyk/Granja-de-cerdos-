@@ -55,6 +55,26 @@ class SessionManager private constructor(context: Context) {
     private val _session = MutableStateFlow(readSession())
     val session: StateFlow<Session?> = _session.asStateFlow()
 
+    private val _serverUrl: MutableStateFlow<String>
+    val serverUrlFlow: StateFlow<String>
+
+    init {
+        if (!prefs.getBoolean(KEY_CLOUD_MIGRATED, false)) {
+            val storedServer = prefs.getString(KEY_SERVER, null)
+            val migrated = if (storedServer.isNullOrBlank() || storedServer == LEGACY_LAN_SERVER) {
+                DEFAULT_SERVER
+            } else {
+                normalizeUrl(storedServer)
+            }
+            prefs.edit()
+                .putString(KEY_SERVER, migrated)
+                .putBoolean(KEY_CLOUD_MIGRATED, true)
+                .apply()
+        }
+        _serverUrl = MutableStateFlow(serverUrl())
+        serverUrlFlow = _serverUrl.asStateFlow()
+    }
+
     fun current(): Session? = _session.value
 
     /** Sesión vigente (existe y no ha vencido). Si venció se descarta. */
@@ -68,8 +88,19 @@ class SessionManager private constructor(context: Context) {
     }
 
     fun save(session: Session) {
-        val encrypted = encrypt(gson.toJson(session))
-        prefs.edit().putString(KEY_SESSION, encrypted).apply()
+        val json = gson.toJson(session)
+        try {
+            val encrypted = encrypt(json)
+            prefs.edit().putString(KEY_SESSION, encrypted).apply()
+        } catch (_: Exception) {
+            try {
+                deleteSecretKey()
+                val encryptedRetry = encrypt(json)
+                prefs.edit().putString(KEY_SESSION, encryptedRetry).apply()
+            } catch (_: Exception) {
+                prefs.edit().remove(KEY_SESSION).apply()
+            }
+        }
         _session.value = session
     }
 
@@ -83,7 +114,9 @@ class SessionManager private constructor(context: Context) {
     fun serverUrl(): String = prefs.getString(KEY_SERVER, DEFAULT_SERVER) ?: DEFAULT_SERVER
 
     fun setServerUrl(raw: String) {
-        prefs.edit().putString(KEY_SERVER, normalizeUrl(raw)).apply()
+        val normalized = normalizeUrl(raw)
+        prefs.edit().putString(KEY_SERVER, normalized).apply()
+        _serverUrl.value = normalized
     }
 
     private fun readSession(): Session? {
@@ -124,6 +157,13 @@ class SessionManager private constructor(context: Context) {
         return Base64.encodeToString(iv + data, Base64.NO_WRAP)
     }
 
+    private fun deleteSecretKey() {
+        val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (ks.containsAlias(KEY_ALIAS)) {
+            ks.deleteEntry(KEY_ALIAS)
+        }
+    }
+
     private fun decrypt(encoded: String): String {
         val all = Base64.decode(encoded, Base64.NO_WRAP)
         val iv = all.copyOfRange(0, GCM_IV_BYTES)
@@ -134,12 +174,16 @@ class SessionManager private constructor(context: Context) {
     }
 
     companion object {
-        /** Servidor por defecto en la red local de la granja/PC. */
-        const val DEFAULT_SERVER = "http://192.168.0.208:5153"
+        /** Servidor productivo por defecto en Render Cloud. */
+        const val DEFAULT_SERVER = "https://agropig-web.onrender.com"
+
+        /** Dirección LAN heredada para redes locales sin salida a Internet. */
+        const val LEGACY_LAN_SERVER = "http://192.168.0.208:5153"
 
         private const val PREFS = "agropig_session"
         private const val KEY_SESSION = "session"
         private const val KEY_SERVER = "server_url"
+        private const val KEY_CLOUD_MIGRATED = "cloud_server_migrated_v2"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "agropig_session_key"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
@@ -154,15 +198,40 @@ class SessionManager private constructor(context: Context) {
                 instance ?: SessionManager(context).also { instance = it }
             }
 
-        /** Limpia lo que el usuario escribe: agrega http:// si falta, quita rutas y la barra final. */
+        private fun isLocalOrLanHost(hostPort: String): Boolean {
+            val host = hostPort.substringBefore(':').lowercase()
+            if (host == "localhost" || host.endsWith(".local")) return true
+            if (host.startsWith("127.") || host.startsWith("10.") || host.startsWith("192.168.")) return true
+            if (host.startsWith("172.")) {
+                val secondOctet = host.removePrefix("172.").substringBefore('.').toIntOrNull()
+                if (secondOctet != null && secondOctet in 16..31) return true
+            }
+            val portPart = hostPort.substringAfter(':', "")
+            return portPart.isNotEmpty() && portPart.all { it.isDigit() }
+        }
+
+        /**
+         * Normaliza lo que el usuario escribe:
+         * - Dominios públicos (ej. *.onrender.com) usan https://
+         * - Hosts LAN/emulador/con puerto explícito usan http://
+         * - Si es *.onrender.com con http:// se fuerza a https://
+         * - Recorta rutas posteriores al host y barras finales.
+         */
         fun normalizeUrl(raw: String): String {
-            var url = raw.trim()
+            var url = raw.trim().trim('"', '\'', ' ')
             if (url.isEmpty()) return DEFAULT_SERVER
-            if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) url = "http://$url"
+            if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+                val candidateHostPort = url.substringBefore('/').lowercase()
+                val scheme = if (isLocalOrLanHost(candidateHostPort)) "http" else "https"
+                url = "$scheme://$url"
+            }
             val schemeEnd = url.indexOf("://") + 3
-            val pathStart = url.indexOf('/', schemeEnd)
-            if (pathStart > 0) url = url.substring(0, pathStart)
-            return url.trimEnd('/')
+            val scheme = url.substring(0, schemeEnd - 3).lowercase()
+            val authority = url.substring(schemeEnd).substringBefore('/').trimEnd('/')
+            if (authority.isEmpty()) return DEFAULT_SERVER
+            val hostOnly = authority.substringBefore(':').lowercase()
+            val finalScheme = if (scheme == "http" && hostOnly.endsWith(".onrender.com")) "https" else scheme
+            return "$finalScheme://$authority"
         }
     }
 }

@@ -7,12 +7,17 @@ import com.example.porciapp.data.local.entities.*
 import com.example.porciapp.data.model.FeedSupplyRecord
 import com.example.porciapp.data.model.MedicalTreatmentRecord
 import com.example.porciapp.data.model.ReproductiveEventRecord
+import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.data.net.ApiClient
 import com.example.porciapp.data.net.ApiResult
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.util.Calendar
 import java.util.UUID
 
@@ -28,7 +33,9 @@ class FarmRepository(private val context: Context) {
     private val operacionGastoDao = db.operacionGastoDao()
     private val bajaMortalidadDao = db.bajaMortalidadDao()
     private val notificacionDao = db.notificacionDao()
+    private val masterCatalogDao = db.masterCatalogDao()
     private val gson = Gson()
+    private val listStringType = object : TypeToken<List<String>>() {}.type
 
     val sessionManager: SessionManager = SessionManager.get(context)
     val apiClient: ApiClient = ApiClient(sessionManager)
@@ -57,6 +64,116 @@ class FarmRepository(private val context: Context) {
     val notificacionesFlow: Flow<List<NotificacionEntity>> = notificacionDao.getAllFlow()
     val notificacionesNoLeidasCount: Flow<Int> = notificacionDao.countNoLeidasFlow()
     val tareasPendientesCount: Flow<Int> = tareaDao.countPendientesFlow()
+
+    /** Flujo de labores y gastos filtrados según permisos del rol activo. */
+    fun getOperacionesForRoleFlow(role: UserRole): Flow<List<OperacionGastoEntity>> =
+        if (role == UserRole.ADMINISTRADOR) {
+            operacionesGastosFlow
+        } else {
+            operacionesGastosFlow.map { list ->
+                list.filter { it.tipoRegistro.equals("LABOR_CAMPO", ignoreCase = true) }
+                    .map { it.copy(montoCordobas = 0.0, montoDolares = 0.0) }
+            }.distinctUntilChanged()
+        }
+
+    /** Flujo de notificaciones filtradas por rol para evitar exposición cruzada en Room offline. */
+    fun getNotificacionesForRoleFlow(role: UserRole): Flow<List<NotificacionEntity>> =
+        when (role) {
+            UserRole.ADMINISTRADOR -> notificacionesFlow
+            UserRole.VETERINARIO -> notificacionesFlow.map { list ->
+                list.filterNot { it.tipo.equals("desviacion_financiera", ignoreCase = true) }
+            }.distinctUntilChanged()
+            UserRole.OPERARIO -> notificacionesFlow.map { list ->
+                val restringidos = setOf(
+                    "desviacion_financiera",
+                    "protocolo_sanitario",
+                    "mortalidad_anormal",
+                    "reproduccion"
+                )
+                list.filterNot { it.tipo.lowercase() in restringidos }
+            }.distinctUntilChanged()
+        }
+
+    /** Purga cachés de solo lectura dependientes del rol manteniendo registros pendientes (sincronizado = 0) en Outbox. */
+    suspend fun clearRoleScopedCache() {
+        catalogStore.clear()
+        masterCatalogDao.clearAllCatalogs()
+        notificacionDao.deleteAll()
+        tareaDao.deleteSynced()
+        cerdoDao.deleteSynced()
+        operacionGastoDao.deleteSynced()
+    }
+
+    // Flujos de catálogos maestros desde SQLite
+    val galponesCatFlow: Flow<List<CatGalponEntity>> = masterCatalogDao.getGalponesFlow()
+    val jaulasCatFlow: Flow<List<CatJaulaEntity>> = masterCatalogDao.getJaulasFlow()
+    val insumosCatFlow: Flow<List<CatInsumoEntity>> = masterCatalogDao.getInsumosFlow()
+    val laboresCatFlow: Flow<List<CatLaborEntity>> = masterCatalogDao.getLaboresFlow()
+    val horariosCatFlow: Flow<List<CatHorarioEntity>> = masterCatalogDao.getHorariosFlow()
+    val operariosCatFlow: Flow<List<CatOperarioEntity>> = masterCatalogDao.getOperariosFlow()
+    val clinicosCatFlow: Flow<List<CatClinicoEntity>> = masterCatalogDao.getClinicosFlow()
+
+    private fun userPrefKey(userId: String, role: UserRole): String =
+        "${userId.ifBlank { role.name }}::${role.name}"
+
+    fun getUiPreferencesFlow(userId: String, role: UserRole): Flow<WorkspaceUiPreferences> =
+        masterCatalogDao.getPreferenciaFlow(userPrefKey(userId, role))
+            .map { entity ->
+                if (entity == null) WorkspaceUiPreferences.defaultFor(role)
+                else WorkspaceUiPreferences(
+                    rolBase = role,
+                    modulosVisibles = parseJsonList(entity.modulosVisiblesJson),
+                    accionesRapidas = parseJsonList(entity.accionesRapidasJson),
+                    navInferior = parseJsonList(entity.navInferiorJson),
+                    galponPredeterminado = entity.galponPredeterminado,
+                    turnoPredeterminado = entity.turnoPredeterminado,
+                    monedaPreferida = entity.monedaPreferida,
+                    modoCompacto = entity.modoCompacto,
+                    updatedAtMs = entity.updatedAtMs
+                ).sanitizedFor(role)
+            }
+            .distinctUntilChanged()
+
+    private fun parseJsonList(raw: String): List<String> = try {
+        gson.fromJson<List<String>>(raw, listStringType).orEmpty()
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    suspend fun updateUiPreferences(userId: String, role: UserRole, prefs: WorkspaceUiPreferences) {
+        val clean = prefs.sanitizedFor(role).copy(updatedAtMs = System.currentTimeMillis())
+        masterCatalogDao.savePreferenciaUi(
+            PreferenciaUiEntity(
+                userKey = userPrefKey(userId, role),
+                rolBase = role.titulo,
+                modulosVisiblesJson = gson.toJson(clean.modulosVisibles),
+                accionesRapidasJson = gson.toJson(clean.accionesRapidas),
+                navInferiorJson = gson.toJson(clean.navInferior),
+                galponPredeterminado = clean.galponPredeterminado,
+                turnoPredeterminado = clean.turnoPredeterminado,
+                monedaPreferida = clean.monedaPreferida,
+                modoCompacto = clean.modoCompacto,
+                updatedAtMs = clean.updatedAtMs
+            )
+        )
+        val active = sessionManager.valid()
+        if (active != null && !active.token.startsWith("OFFLINE_BEARER")) {
+            try {
+                val payload = JsonObject().apply {
+                    addProperty("rolBase", role.titulo)
+                    add("modulosVisibles", gson.toJsonTree(clean.modulosVisibles))
+                    add("accionesRapidas", gson.toJsonTree(clean.accionesRapidas))
+                    add("navInferior", gson.toJsonTree(clean.navInferior))
+                    addProperty("galponPredeterminado", clean.galponPredeterminado)
+                    addProperty("turnoPredeterminado", clean.turnoPredeterminado)
+                    addProperty("monedaPreferida", clean.monedaPreferida)
+                    addProperty("modoCompacto", clean.modoCompacto)
+                    addProperty("updatedAtMs", clean.updatedAtMs)
+                }
+                apiClient.saveUiPreferences(payload)
+            } catch (_: Exception) { /* Persiste en SQLite si offline */ }
+        }
+    }
 
     // Métricas reactivas dinámicas calculadas de Room para la jornada de hoy
     val partosHoyFlow: Flow<Int> = eventoReproductivoDao.countPartosDesdeFlow(getStartOfDayMillis())
@@ -133,6 +250,10 @@ class FarmRepository(private val context: Context) {
 
     suspend fun retryFailedSync() {
         syncQueueDao.retryFailed()
+    }
+
+    suspend fun discardFailedSync() {
+        syncQueueDao.deleteFailed()
     }
 
     // 1. Guardar Tratamiento Médico con Patrón Outbox y Auditoría Clínica Completa
@@ -263,7 +384,9 @@ class FarmRepository(private val context: Context) {
             idOperario = operarioNombre,
             notasConsumo = gson.toJson(record.notasConsumo),
             observacionAdicional = record.observacionAdicional,
-            sincronizado = false
+            sincronizado = false,
+            siloCodigo = record.siloCodigo.ifBlank { null },
+            horarioToma = record.horarioToma.ifBlank { null }
         )
         consumoAlimentoDao.insert(entity)
 
@@ -361,6 +484,7 @@ class FarmRepository(private val context: Context) {
             // Las tareas de demostración (TASK-0x) de versiones anteriores ya no existen en el servidor
             tareaDao.deleteLegacySeed()
             syncQueueDao.deleteLegacyTaskItems()
+            notificacionDao.deleteAll()
             if (cat.notificaciones.isNotEmpty()) {
                 val notifs = cat.notificaciones.map { n ->
                     NotificacionEntity(
@@ -375,6 +499,7 @@ class FarmRepository(private val context: Context) {
                 }
                 notificacionDao.insertAll(notifs)
             }
+            tareaDao.deleteSynced()
             if (cat.tareas.isNotEmpty()) {
                 val tareas = cat.tareas.map { t ->
                     TareaEntity(
@@ -392,6 +517,122 @@ class FarmRepository(private val context: Context) {
                     )
                 }
                 tareaDao.insertAll(tareas)
+            }
+
+            // Persistir los 7 catálogos maestros reales en Room SQLite
+            val galponEntities = cat.galpones.map {
+                CatGalponEntity(it.codigo, it.nombre, it.tipoSistema, it.capacidad, it.temperaturaC, it.humedadPct)
+            }
+            val jaulaEntities = cat.jaulas.map {
+                CatJaulaEntity(it.codigo, it.nombre, it.galponCodigo, it.galponNombre, it.etapaZootecnica, it.capacidadMaxima, it.ocupacionActual)
+            }
+            val insumoEntities = cat.insumosDetalle.map {
+                CatInsumoEntity(it.sku, it.id, it.nombre, it.categoriaCodigo, it.unidadMedida, it.stockActual, it.stockMinimo, it.costoUnitarioUsd, it.siloCodigo)
+            }
+            val laborEntities = cat.labores.map {
+                CatLaborEntity(it.codigo, it.nombre, it.tipoRegistro, it.categoria, it.etapaSugerida, it.galponSugerido, it.duracionSugerida, it.tarifaReferenciaNio, it.centroCostoCodigo, it.rolSugerido, it.requiereInsumo)
+            }
+            val horarioEntities = cat.horarios.map {
+                CatHorarioEntity(it.codigo, it.nombre, it.tipoHorario, it.horaInicio, it.horaFin, it.categoriaActividad, it.etapaAplicable, it.rolResponsable, it.prioridadDefault, it.descripcion)
+            }
+            val operarioEntities = cat.operarios.map {
+                CatOperarioEntity(it.id, it.nombreUsuario, it.nombre, it.rol, it.matricula)
+            }
+            val clinicoEntities = cat.catalogosClinicos.map {
+                CatClinicoEntity(it.codigo, it.tipoCatalogo, it.nombre, it.subcategoria, it.diasRetiroReferencia)
+            } + cat.lineasGeneticas.mapIndexed { idx, lin ->
+                CatClinicoEntity("LIN-${idx + 1}", "LINEA_GENETICA", lin, "", 0)
+            }
+
+            masterCatalogDao.replaceMasterCatalogs(
+                galpones = galponEntities,
+                jaulas = jaulaEntities,
+                insumos = insumoEntities,
+                labores = laborEntities,
+                horarios = horarioEntities,
+                operarios = operarioEntities,
+                clinicos = clinicoEntities
+            )
+
+            // Sincronizar cerdos individuales y cerdas desde PostgreSQL preservando altas offline pendientes
+            if (cat.cerdosIndividuales.isNotEmpty() || cat.cerdas.isNotEmpty()) {
+                val unsyncedCrotals = cerdoDao.getUnsynced().map { it.codigoCrotal.uppercase() }.toSet()
+                cerdoDao.deleteSynced()
+                val syncedList = mutableListOf<CerdoEntity>()
+                val seenCrotals = HashSet(unsyncedCrotals)
+                for (c in cat.cerdosIndividuales) {
+                    val crotalUp = c.crotal.uppercase()
+                    if (seenCrotals.add(crotalUp)) {
+                        syncedList.add(
+                            CerdoEntity(
+                                id = c.id.ifBlank { UUID.randomUUID().toString() },
+                                codigoCrotal = c.crotal,
+                                sexo = c.sexo,
+                                raza = c.raza,
+                                idGalpon = c.galpon,
+                                jaula = c.jaula,
+                                estado = c.etapa.uppercase(),
+                                fechaNacimiento = if (c.fechaNacimientoMs > 0L) c.fechaNacimientoMs else System.currentTimeMillis(),
+                                sincronizado = true
+                            )
+                        )
+                    }
+                }
+                for (s in cat.cerdas) {
+                    val caravanaUp = s.caravana.uppercase()
+                    if (seenCrotals.add(caravanaUp)) {
+                        syncedList.add(
+                            CerdoEntity(
+                                id = "SOW-${s.caravana}",
+                                codigoCrotal = s.caravana,
+                                sexo = "HEMBRA",
+                                raza = "Reproductora",
+                                idGalpon = s.galpon,
+                                jaula = s.jaula,
+                                estado = s.estado.uppercase(),
+                                partoHistorico = "Parto #${s.paridad}",
+                                sincronizado = true
+                            )
+                        )
+                    }
+                }
+                if (syncedList.isNotEmpty()) cerdoDao.insertAll(syncedList)
+            }
+
+            // Fusionar preferencias de UI del servidor si el usuario aún no tiene local más reciente
+            val activeSession = sessionManager.current()
+            val srvPref = cat.preferenciasUi
+            if (activeSession != null && srvPref != null) {
+                val role = activeSession.rol
+                val key = userPrefKey(activeSession.userId, role)
+                val localPref = masterCatalogDao.getPreferenciaSync(key)
+                if (localPref == null || srvPref.updatedAtMs >= localPref.updatedAtMs) {
+                    val clean = WorkspaceUiPreferences(
+                        rolBase = role,
+                        modulosVisibles = srvPref.modulosVisibles.orEmpty(),
+                        accionesRapidas = srvPref.accionesRapidas.orEmpty(),
+                        navInferior = srvPref.navInferior.orEmpty(),
+                        galponPredeterminado = srvPref.galponPredeterminado.orEmpty(),
+                        turnoPredeterminado = srvPref.turnoPredeterminado.orEmpty(),
+                        monedaPreferida = srvPref.monedaPreferida.orEmpty(),
+                        modoCompacto = srvPref.modoCompacto,
+                        updatedAtMs = srvPref.updatedAtMs
+                    ).sanitizedFor(role)
+                    masterCatalogDao.savePreferenciaUi(
+                        PreferenciaUiEntity(
+                            userKey = key,
+                            rolBase = role.titulo,
+                            modulosVisiblesJson = gson.toJson(clean.modulosVisibles),
+                            accionesRapidasJson = gson.toJson(clean.accionesRapidas),
+                            navInferiorJson = gson.toJson(clean.navInferior),
+                            galponPredeterminado = clean.galponPredeterminado,
+                            turnoPredeterminado = clean.turnoPredeterminado,
+                            monedaPreferida = clean.monedaPreferida,
+                            modoCompacto = clean.modoCompacto,
+                            updatedAtMs = clean.updatedAtMs
+                        )
+                    )
+                }
             }
         }
         return res

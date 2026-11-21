@@ -110,7 +110,7 @@
         var rol = RoleService.CurrentRoleName;
         var bloqueadoPorPassword = RoleService.DebeCambiarPassword;
         var toast = ViewContext.TempData["Toast"] as string;
-        var notifs = await DataService.GetNotificacionesActivasAsync();
+        var notifs = await DataService.GetNotificacionesActivasAsync(rol, user.Nombre);
     }
 
     <!-- Backdrop para dispositivos móviles -->
@@ -178,15 +178,17 @@
                 </button>
             }
 
-            <!-- Primary Navigation Cluster grouped by Lógica & Costes / Ciclo & Operaciones / Abastecimiento -->
+            <!-- Primary Navigation Cluster grouped by Role -->
             <nav aria-label="Navegación principal" class="flex flex-col gap-1 mt-1 @(bloqueadoPorPassword ? "pointer-events-none opacity-40" : "")">
-                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-1 pb-0.5">Lógica &amp; Costes</div>
+                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-1 pb-0.5">
+                    @(RoleService.EsAdmin ? "Lógica & Costes" : RoleService.EsVeterinario ? "Dirección Clínica" : "Operación de Galpón")
+                </div>
 
-                <!-- 1. Consola Lógica & Costes -->
+                <!-- 1. Consola Principal -->
                 <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Index" || currentPage == "" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/">
                     <div class="flex items-center gap-2.5">
                         <span class="material-symbols-outlined @(currentPage == "/Index" || currentPage == "" ? "fill" : "")">dashboard</span>
-                        <span>Consola Lógica &amp; Costes</span>
+                        <span>@(RoleService.EsAdmin ? "Consola Lógica & Costes" : RoleService.EsVeterinario ? "Consola Clínica" : "Mi Consola de Campo")</span>
                     </div>
                 </a>
 
@@ -202,53 +204,60 @@
                     </a>
                 }
 
-                <!-- 3. Lotes & Simulador -->
+                <!-- 3. Lotes & Simulador / Corrales -->
                 <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Lotes" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Lotes">
                     <div class="flex items-center gap-2.5">
                         <span class="material-symbols-outlined @(currentPage == "/Lotes" ? "fill" : "")">pets</span>
-                        <span>Lotes &amp; Simulador</span>
+                        <span>@(RoleService.EsAdmin ? "Lotes & Simulador" : RoleService.EsVeterinario ? "Lotes & Galpones" : "Lotes & Corrales")</span>
                     </div>
                 </a>
 
-                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-2.5 pb-0.5">Ciclo &amp; Operaciones</div>
+                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-2.5 pb-0.5">
+                    @(RoleService.EsOperario ? "Campo & Agenda" : "Ciclo & Operaciones")
+                </div>
 
-                <!-- 4. Ciclo 114d & Partos -->
-                <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Reproduccion" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Reproduccion">
-                    <div class="flex items-center gap-2.5">
-                        <span class="material-symbols-outlined @(currentPage == "/Reproduccion" ? "fill" : "")">vaccines</span>
-                        <span>Ciclo 114d &amp; Partos</span>
-                    </div>
-                    @if (RoleService.EsVeterinario)
-                    {
-                        <span class="text-[9px] font-bold px-1.5 py-0.2 bg-teal-100 text-teal-800 rounded">Clínica</span>
-                    }
-                </a>
+                <!-- 4. Ciclo 114d & Partos (Admin y Veterinario) -->
+                @if (RoleService.EsAdmin || RoleService.EsVeterinario)
+                {
+                    <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Reproduccion" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Reproduccion">
+                        <div class="flex items-center gap-2.5">
+                            <span class="material-symbols-outlined @(currentPage == "/Reproduccion" ? "fill" : "")">vaccines</span>
+                            <span>Ciclo 114d &amp; Partos</span>
+                        </div>
+                        @if (RoleService.EsVeterinario)
+                        {
+                            <span class="text-[9px] font-bold px-1.5 py-0.2 bg-teal-100 text-teal-800 rounded">Clínica</span>
+                        }
+                    </a>
+                }
 
                 <!-- 5. Padrón & Planes Zootécnicos -->
                 <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Cerdos" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Cerdos">
                     <div class="flex items-center gap-2.5">
                         <span class="material-symbols-outlined @(currentPage == "/Cerdos" ? "fill" : "")">grid_view</span>
-                        <span>Padrón &amp; Planes</span>
+                        <span>@(RoleService.EsVeterinario ? "Padrón & Plan Vacunal" : RoleService.EsOperario ? "Padrón de Cerdos" : "Padrón & Planes")</span>
                     </div>
-                    <span class="text-[9px] font-bold px-1.5 py-0.2 bg-primary/10 text-primary rounded">IA / Vac.</span>
+                    <span class="text-[9px] font-bold px-1.5 py-0.2 bg-primary/10 text-primary rounded">@(RoleService.EsOperario ? "Consulta" : "IA / Vac.")</span>
                 </a>
 
                 <!-- 6. Tareas & Labores Sync -->
                 <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Calendario" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Calendario">
                     <div class="flex items-center gap-2.5">
                         <span class="material-symbols-outlined @(currentPage == "/Calendario" ? "fill" : "")">calendar_month</span>
-                        <span>Tareas &amp; Labores Sync</span>
+                        <span>@(RoleService.EsVeterinario ? "Agenda Clínica" : RoleService.EsOperario ? "Mis Tareas & Labores" : "Tareas & Labores Sync")</span>
                     </div>
                     <span class="text-[9px] font-bold px-1.5 py-0.2 bg-primary/10 text-primary rounded">Móvil</span>
                 </a>
 
-                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-2.5 pb-0.5">Abastecimiento &amp; Accesos</div>
+                <div class="text-[10px] font-bold uppercase tracking-wider text-outline px-3 pt-2.5 pb-0.5">
+                    @(RoleService.EsAdmin ? "Abastecimiento & Accesos" : RoleService.EsVeterinario ? "Farmacia & Suministros" : "Bodega & Silos")
+                </div>
 
                 <!-- 7. Silos & Kardex -->
                 <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Inventario" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Inventario">
                     <div class="flex items-center gap-2.5">
                         <span class="material-symbols-outlined @(currentPage == "/Inventario" ? "fill" : "")">inventory_2</span>
-                        <span>Silos &amp; Kardex</span>
+                        <span>@(RoleService.EsVeterinario ? "Farmacia & Stock" : RoleService.EsOperario ? "Silos & Bodega Física" : "Silos & Kardex")</span>
                     </div>
                 </a>
 
@@ -258,7 +267,7 @@
                     <a class="flex items-center justify-between px-3 py-2 text-xs font-semibold rounded transition-colors duration-150 @(currentPage == "/Compras" ? "text-primary bg-primary-fixed" : "text-on-surface-variant hover:bg-surface-container-low")" href="/Compras">
                         <div class="flex items-center gap-2.5">
                             <span class="material-symbols-outlined @(currentPage == "/Compras" ? "fill" : "")">shopping_cart</span>
-                            <span>Compras &amp; Descuentos</span>
+                            <span>@(RoleService.EsVeterinario ? "Requisiciones Clínicas" : "Compras & Descuentos")</span>
                         </div>
                     </a>
                 }

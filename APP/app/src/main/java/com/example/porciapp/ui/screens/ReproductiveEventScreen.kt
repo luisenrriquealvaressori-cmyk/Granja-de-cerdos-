@@ -23,13 +23,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.porciapp.data.local.entities.CatClinicoEntity
+import com.example.porciapp.data.local.entities.CatHorarioEntity
+import com.example.porciapp.data.local.entities.CatJaulaEntity
+import com.example.porciapp.data.local.entities.CerdoEntity
 import com.example.porciapp.data.model.ReproductiveEventRecord
 import com.example.porciapp.data.model.ReproductiveEventType
 import com.example.porciapp.data.model.UserProfile
 import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.data.repository.CatalogStore
 import com.example.porciapp.ui.components.*
 import com.example.porciapp.ui.theme.*
@@ -42,26 +48,144 @@ import java.util.Locale
 fun ReproductiveEventScreen(
     onBackClick: () -> Unit,
     activeProfile: UserProfile = UserProfile.defaultFor(UserRole.VETERINARIO),
+    clinicosCatalog: List<CatClinicoEntity> = emptyList(),
+    horariosCatalog: List<CatHorarioEntity> = emptyList(),
+    jaulasCatalog: List<CatJaulaEntity> = emptyList(),
+    cerdosFromDb: List<CerdoEntity> = emptyList(),
+    uiPrefs: WorkspaceUiPreferences = WorkspaceUiPreferences.defaultFor(activeProfile.rol),
     onSaveRecord: (ReproductiveEventRecord) -> Unit = {}
 ) {
     val context = LocalContext.current
     val catalogState by CatalogStore.get(context).catalog.collectAsState()
 
     var eventType by remember { mutableStateOf(ReproductiveEventType.SERVICIO_IA) }
-    var filtroCerda by remember { mutableStateOf("") }
-    var crotal by remember(catalogState.cerdas) {
-        mutableStateOf(catalogState.cerdas.firstOrNull()?.caravana ?: "")
+    var usarCrotalManual by remember { mutableStateOf(false) }
+
+    val cerdasItems = remember(catalogState.cerdas, cerdosFromDb) {
+        val seen = mutableSetOf<String>()
+        val list = catalogState.cerdas.map { c ->
+            seen.add(c.caravana.uppercase())
+            CatalogChoiceItem(
+                id = c.caravana,
+                title = "Cerda ${c.caravana}",
+                subtitle = "${c.estado.replace('_', ' ')} • ${c.galpon} ${c.jaula} • Parto #${c.paridad}".trim(),
+                badge = c.estado.replace('_', ' '),
+                category = c.galpon.ifBlank { "Cerdas" }
+            )
+        }
+        val extraHembras = cerdosFromDb
+            .filter { it.sexo.equals("Hembra", ignoreCase = true) && seen.add(it.codigoCrotal.uppercase()) }
+            .map { p ->
+                CatalogChoiceItem(
+                    id = p.codigoCrotal,
+                    title = "Hembra ${p.codigoCrotal}",
+                    subtitle = "${p.raza} • ${p.jaula}".trim(),
+                    badge = "LOCAL",
+                    category = "Registro Individual"
+                )
+            }
+        list + extraHembras
     }
-    var jaulaActual by remember(catalogState.cerdas) {
-        mutableStateOf(catalogState.cerdas.firstOrNull()?.jaula ?: "")
+
+    val verracosItems = remember(catalogState.verracos) {
+        catalogState.verracos.map { v ->
+            CatalogChoiceItem(
+                id = v.codigo,
+                title = "${v.codigo} • ${v.nombre}",
+                subtitle = "Dosis seminal certificada en granja",
+                badge = v.codigo
+            )
+        }
+    }
+
+    val tecnicasItems = remember(clinicosCatalog, catalogState.catalogosClinicos) {
+        val fromRoom = clinicosCatalog.filter { it.tipoCatalogo == "TECNICA_IA" }.map {
+            CatalogChoiceItem(id = it.nombre, title = it.nombre, subtitle = it.subcategoria, badge = it.codigo)
+        }
+        if (fromRoom.isNotEmpty()) fromRoom else catalogState.catalogosClinicos.filter { it.tipoCatalogo == "TECNICA_IA" }.map {
+            CatalogChoiceItem(id = it.nombre, title = it.nombre, subtitle = it.subcategoria, badge = it.codigo)
+        }.ifEmpty {
+            listOf(
+                CatalogChoiceItem("IA Tradicional", "IA Tradicional", "Cervical estándar"),
+                CatalogChoiceItem("IA Post-Cervical", "IA Post-Cervical", "Profunda"),
+                CatalogChoiceItem("Monta Natural", "Monta Natural", "Servicio directo")
+            )
+        }
+    }
+
+    val dosisIaItems = remember(horariosCatalog, catalogState.horarios) {
+        val fromRoom = horariosCatalog.filter { it.tipoHorario == "DOSIS_IA" }.map {
+            CatalogChoiceItem(
+                id = it.nombre,
+                title = it.nombre,
+                subtitle = "${it.horaInicio} - ${it.horaFin}".trim(' ', '-')
+            )
+        }
+        if (fromRoom.isNotEmpty()) fromRoom else catalogState.horarios.filter { it.tipoHorario == "DOSIS_IA" }.map {
+            CatalogChoiceItem(id = it.nombre, title = it.nombre, subtitle = "${it.horaInicio} - ${it.horaFin}".trim(' ', '-'))
+        }.ifEmpty {
+            listOf(
+                CatalogChoiceItem("AM", "Dosis Mañana (AM)", "06:30 - 09:00"),
+                CatalogChoiceItem("PM", "Dosis Tarde (PM)", "16:00 - 18:00")
+            )
+        }
+    }
+
+    val jaulasMaternidadItems = remember(jaulasCatalog, catalogState.jaulas) {
+        val all = if (jaulasCatalog.isNotEmpty()) {
+            jaulasCatalog.map {
+                Triple(it.nombre, "${it.galponNombre} • ${it.etapaZootecnica}", it.codigo to it.galponNombre)
+            }
+        } else {
+            catalogState.jaulas.map {
+                Triple(it.nombre, "${it.galponNombre} • ${it.etapaZootecnica}", it.codigo to it.galponNombre)
+            }
+        }
+        val maternidad = all.filter {
+            it.second.contains("Maternidad", ignoreCase = true) || it.first.contains("MAT", ignoreCase = true)
+        }
+        (maternidad.ifEmpty { all }).map { (nombre, sub, pair) ->
+            CatalogChoiceItem(
+                id = nombre,
+                title = nombre,
+                subtitle = sub,
+                badge = pair.first,
+                category = pair.second
+            )
+        }
+    }
+
+    var crotal by remember(cerdasItems) {
+        mutableStateOf(cerdasItems.firstOrNull()?.id ?: "")
+    }
+    var jaulaActual by remember(catalogState.cerdas, jaulasMaternidadItems) {
+        mutableStateOf(catalogState.cerdas.firstOrNull()?.jaula ?: jaulasMaternidadItems.firstOrNull()?.id.orEmpty())
+    }
+    var jaulaMaternidad by remember(jaulasMaternidadItems) {
+        mutableStateOf(jaulasMaternidadItems.firstOrNull()?.id.orEmpty())
     }
 
     // Campos SERVICIO_IA
-    var verracoCodigo by remember(catalogState.verracos) {
-        mutableStateOf(catalogState.verracos.firstOrNull()?.codigo ?: "")
+    var verracoCodigo by remember(verracosItems) {
+        mutableStateOf(verracosItems.firstOrNull()?.id ?: "")
     }
-    var tecnicaIa by remember { mutableStateOf("IA Tradicional") }
-    var turnoIa by remember { mutableStateOf("AM") }
+    var tecnicaIa by remember(tecnicasItems) {
+        mutableStateOf(tecnicasItems.firstOrNull()?.id ?: "IA Tradicional")
+    }
+    var turnoIa by remember(dosisIaItems, uiPrefs.turnoPredeterminado) {
+        val pref = uiPrefs.turnoPredeterminado
+        val match = if (pref.contains("TAR", true)) {
+            dosisIaItems.firstOrNull { it.id.contains("PM", true) || it.id.contains("Tarde", true) }
+        } else {
+            dosisIaItems.firstOrNull()
+        }
+        mutableStateOf(match?.id ?: dosisIaItems.firstOrNull()?.id ?: "AM")
+    }
+
+    var showCerdaSheet by remember { mutableStateOf(false) }
+    var showVerracoSheet by remember { mutableStateOf(false) }
+    var showTecnicaSheet by remember { mutableStateOf(false) }
+    var showJaulaMaternidadSheet by remember { mutableStateOf(false) }
 
     // Campos PARTO y DESTETE
     var nacidosVivos by remember { mutableIntStateOf(12) }
@@ -75,27 +199,6 @@ fun ReproductiveEventScreen(
     var condicionCorporal by remember { mutableIntStateOf(3) }
 
     var showConfirmModal by remember { mutableStateOf(false) }
-
-    val cerdasFiltradas = remember(catalogState.cerdas, filtroCerda, eventType) {
-        val base = catalogState.cerdas
-        val ordenadas = when (eventType) {
-            ReproductiveEventType.SERVICIO_IA -> base.sortedBy {
-                if (it.estado.contains("vacia", true) || it.estado.contains("celo", true)) 0 else 1
-            }
-            ReproductiveEventType.PARTO -> base.sortedBy {
-                if (it.estado.contains("gestante", true) || it.estado.contains("servida", true)) 0 else 1
-            }
-            ReproductiveEventType.DESTETE -> base.sortedBy {
-                if (it.estado.contains("lactante", true) || it.estado.contains("maternidad", true)) 0 else 1
-            }
-        }
-        if (filtroCerda.isBlank()) ordenadas
-        else ordenadas.filter {
-            it.caravana.contains(filtroCerda, ignoreCase = true) ||
-                it.galpon.contains(filtroCerda, ignoreCase = true) ||
-                it.jaula.contains(filtroCerda, ignoreCase = true)
-        }
-    }
 
     val fechaPartoProyectada = remember {
         val cal = Calendar.getInstance()
@@ -117,6 +220,7 @@ fun ReproductiveEventScreen(
     }
     val mortalidadPartoPct = if (totalNacidos > 0) ((nacidosMuertos + momificados) * 100.0) / totalNacidos else 0.0
 
+    val puedeRegistrar = activeProfile.rol.puedeRegistrarPartos
     val formularioValido = when (eventType) {
         ReproductiveEventType.SERVICIO_IA -> crotal.isNotBlank()
         ReproductiveEventType.PARTO -> crotal.isNotBlank() && totalNacidos > 0
@@ -124,6 +228,7 @@ fun ReproductiveEventScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Column {
                 FieldTopBar(
@@ -148,14 +253,18 @@ fun ReproductiveEventScreen(
                         fontWeight = FontWeight.Bold,
                         color = FieldOnSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                     if (jaulaActual.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Jaula $jaulaActual",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = FieldPrimary
+                            color = FieldPrimary,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -163,14 +272,30 @@ fun ReproductiveEventScreen(
         },
         containerColor = FieldBackground
     ) { innerPadding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 14.dp),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(innerPadding),
+            contentAlignment = Alignment.TopCenter
         ) {
+            LazyColumn(
+                modifier = Modifier
+                    .widthIn(max = 640.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+            if (!puedeRegistrar) {
+                item {
+                    RoleRestrictionWarningBanner(
+                        userRole = activeProfile.rol,
+                        titulo = "Módulo Exclusivo de Maternidad Clínica",
+                        mensaje = "Solo el Veterinario o Administrador puede registrar Servicios IA, Partos o Destetes."
+                    )
+                }
+            }
+
             // Selector 3 modos
             item {
                 Row(
@@ -193,7 +318,7 @@ fun ReproductiveEventScreen(
                                     eventType = tipo
                                     pesoCamadaText = if (tipo == ReproductiveEventType.DESTETE) "68.0" else "16.5"
                                 }
-                                .padding(vertical = 10.dp),
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -201,69 +326,71 @@ fun ReproductiveEventScreen(
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = if (selected) Color.White else FieldOnSurfaceVariant,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             }
 
-            // Selección de Cerda desde Catálogo Real
+            // 1. Selección de Cerda desde Catálogo Real
             item {
+                val cerdaSel = cerdasItems.firstOrNull { it.id.equals(crotal, ignoreCase = true) }
                 TactileCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "1. Identificación de Cerda",
+                            text = "1. Identificación de Cerda (Base de Datos)",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = FieldDarkBorder
                         )
 
-                        if (catalogState.cerdas.isNotEmpty()) {
-                            OutlinedTextField(
-                                value = filtroCerda,
-                                onValueChange = { filtroCerda = it },
-                                label = { Text("Filtrar catálogo (${catalogState.cerdas.size} cerdas)") },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                cerdasFiltradas.take(25).forEach { c ->
-                                    val selected = crotal.equals(c.caravana, ignoreCase = true)
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = {
-                                            crotal = c.caravana
-                                            jaulaActual = c.jaula.ifBlank { c.galpon }
-                                        },
-                                        label = {
-                                            Text("${c.caravana} · ${c.estado.replace('_', ' ')}", maxLines = 1)
-                                        }
-                                    )
-                                }
+                        DatabaseSelectorField(
+                            label = "CERDA REPRODUCTORA / CARAVANA *",
+                            selectedTitle = cerdaSel?.title ?: crotal,
+                            selectedSubtitle = cerdaSel?.subtitle ?: if (jaulaActual.isNotBlank()) "Ubicación: $jaulaActual" else "",
+                            selectedBadge = cerdaSel?.badge.orEmpty(),
+                            placeholder = "Seleccionar cerda del inventario...",
+                            leadingIcon = Icons.Default.Pets,
+                            onClick = {
+                                usarCrotalManual = false
+                                showCerdaSheet = true
                             }
-                        } else {
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(FieldSurfaceContainerHigh)
+                                .clickable { usarCrotalManual = !usarCrotalManual }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Text(
-                                text = "Sin catálogo sincronizado todavía. Escribe la caravana manualmente o presiona Sincronizar en Inicio.",
+                                text = "Ingresar caravana nueva / manual",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = FieldWarning
+                                fontWeight = FontWeight.SemiBold,
+                                color = FieldOnSurface
+                            )
+                            Switch(
+                                checked = usarCrotalManual,
+                                onCheckedChange = { usarCrotalManual = it }
                             )
                         }
 
-                        OutlinedTextField(
-                            value = crotal,
-                            onValueChange = { crotal = it.uppercase() },
-                            label = { Text("Caravana / Crotal de Cerda *") },
-                            placeholder = { Text("Ej. CRD-014") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        if (usarCrotalManual || cerdasItems.isEmpty()) {
+                            OutlinedTextField(
+                                value = crotal,
+                                onValueChange = { crotal = it.uppercase() },
+                                label = { Text("Caravana / Crotal de Cerda *") },
+                                placeholder = { Text("Ej. CRD-014") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
             }
@@ -272,6 +399,8 @@ fun ReproductiveEventScreen(
             when (eventType) {
                 ReproductiveEventType.SERVICIO_IA -> {
                     item {
+                        val verracoSel = verracosItems.firstOrNull { it.id.equals(verracoCodigo, ignoreCase = true) }
+                        val tecnicaSel = tecnicasItems.firstOrNull { it.id.equals(tecnicaIa, ignoreCase = true) }
                         TactileCard(modifier = Modifier.fillMaxWidth()) {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(
@@ -281,99 +410,48 @@ fun ReproductiveEventScreen(
                                     color = FieldDarkBorder
                                 )
 
-                                if (catalogState.verracos.isNotEmpty()) {
+                                DatabaseSelectorField(
+                                    label = "VERRACO / DOSIS SEMINAL (CATÁLOGO BD)",
+                                    selectedTitle = verracoSel?.title ?: verracoCodigo,
+                                    selectedSubtitle = verracoSel?.subtitle.orEmpty(),
+                                    selectedBadge = verracoSel?.badge.orEmpty(),
+                                    placeholder = "Seleccionar verraco registrado...",
+                                    leadingIcon = Icons.Default.Biotech,
+                                    compact = true,
+                                    enabled = verracosItems.isNotEmpty(),
+                                    onClick = { showVerracoSheet = true }
+                                )
+
+                                DatabaseSelectorField(
+                                    label = "TÉCNICA DE INSEMINACIÓN *",
+                                    selectedTitle = tecnicaSel?.title ?: tecnicaIa,
+                                    selectedSubtitle = tecnicaSel?.subtitle.orEmpty(),
+                                    selectedBadge = tecnicaSel?.badge.orEmpty(),
+                                    leadingIcon = Icons.Default.Science,
+                                    compact = true,
+                                    onClick = { showTecnicaSheet = true }
+                                )
+
+                                ScheduleChipSelector(
+                                    label = "HORARIO / DOSIS IA *",
+                                    items = dosisIaItems,
+                                    selectedId = turnoIa,
+                                    onSelect = { turnoIa = it.id }
+                                )
+
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
-                                        text = "Verraco o dosis seminal (catálogo)",
+                                        text = "Condición Corporal (1-5)",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = FieldOnSurfaceVariant
                                     )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        catalogState.verracos.forEach { v ->
-                                            FilterChip(
-                                                selected = verracoCodigo.equals(v.codigo, ignoreCase = true),
-                                                onClick = { verracoCodigo = v.codigo },
-                                                label = { Text("${v.codigo} · ${v.nombre}") }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                OutlinedTextField(
-                                    value = verracoCodigo,
-                                    onValueChange = { verracoCodigo = it.uppercase() },
-                                    label = { Text("Código de Verraco / Lote Semen") },
-                                    placeholder = { Text("Opcional si es monta directa") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                Text(
-                                    text = "Técnica aplicada",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = FieldOnSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf("IA Tradicional", "IA Post-Cervical", "Monta Natural").forEach { t ->
-                                        FilterChip(
-                                            selected = tecnicaIa == t,
-                                            onClick = { tecnicaIa = t },
-                                            label = { Text(t) }
-                                        )
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Turno de dosis",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = FieldOnSurfaceVariant
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            listOf("AM", "PM").forEach { turno ->
-                                                FilterChip(
-                                                    selected = turnoIa == turno,
-                                                    onClick = { turnoIa = turno },
-                                                    label = { Text(turno) }
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Condición Corporal (1-5)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = FieldOnSurfaceVariant
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            (1..5).forEach { cc ->
-                                                FilterChip(
-                                                    selected = condicionCorporal == cc,
-                                                    onClick = { condicionCorporal = cc },
-                                                    label = { Text("$cc") }
-                                                )
-                                            }
-                                        }
-                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    BodyConditionSelector(
+                                        selectedCondition = condicionCorporal,
+                                        onSelect = { condicionCorporal = it },
+                                        prefix = ""
+                                    )
                                 }
 
                                 // Cálculos zootécnicos en vivo
@@ -412,6 +490,7 @@ fun ReproductiveEventScreen(
 
                 ReproductiveEventType.PARTO -> {
                     item {
+                        val jaulaMatSel = jaulasMaternidadItems.firstOrNull { it.id.equals(jaulaMaternidad, ignoreCase = true) }
                         TactileCard(modifier = Modifier.fillMaxWidth()) {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(
@@ -419,6 +498,18 @@ fun ReproductiveEventScreen(
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = FieldDarkBorder
+                                )
+
+                                DatabaseSelectorField(
+                                    label = "JAULA DE MATERNIDAD ASIGNADA *",
+                                    selectedTitle = jaulaMatSel?.title ?: jaulaMaternidad,
+                                    selectedSubtitle = jaulaMatSel?.subtitle.orEmpty(),
+                                    selectedBadge = jaulaMatSel?.badge.orEmpty(),
+                                    placeholder = "Seleccionar jaula paridera...",
+                                    leadingIcon = Icons.Default.Fence,
+                                    compact = true,
+                                    enabled = jaulasMaternidadItems.isNotEmpty(),
+                                    onClick = { showJaulaMaternidadSheet = true }
                                 )
 
                                 CounterStepperRow("Nacidos Vivos", nacidosVivos, FieldGreenPositive) { nacidosVivos = it }
@@ -460,22 +551,23 @@ fun ReproductiveEventScreen(
                                     }
                                 }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    (1..5).forEach { cc ->
-                                        FilterChip(
-                                            selected = condicionCorporal == cc,
-                                            onClick = { condicionCorporal = cc },
-                                            label = { Text("CC $cc") }
-                                        )
-                                    }
-                                }
+                                BodyConditionSelector(
+                                    selectedCondition = condicionCorporal,
+                                    onSelect = { condicionCorporal = it }
+                                )
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Oxitocina aplicada post-parto", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "Oxitocina aplicada post-parto",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    )
                                     Switch(checked = oxitocinaAplicada, onCheckedChange = { oxitocinaAplicada = it })
                                 }
                                 Row(
@@ -483,7 +575,13 @@ fun ReproductiveEventScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Dejar madre en observación clínica", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "Dejar madre en observación clínica",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    )
                                     Switch(checked = madreEnObservacion, onCheckedChange = { madreEnObservacion = it })
                                 }
                             }
@@ -526,22 +624,23 @@ fun ReproductiveEventScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = FieldOnSurfaceVariant
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    (1..5).forEach { cc ->
-                                        FilterChip(
-                                            selected = condicionCorporal == cc,
-                                            onClick = { condicionCorporal = cc },
-                                            label = { Text("CC $cc") }
-                                        )
-                                    }
-                                }
+                                BodyConditionSelector(
+                                    selectedCondition = condicionCorporal,
+                                    onSelect = { condicionCorporal = it }
+                                )
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Madre en observación / recuperación", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "Madre en observación / recuperación",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    )
                                     Switch(checked = madreEnObservacion, onCheckedChange = { madreEnObservacion = it })
                                 }
                             }
@@ -554,11 +653,12 @@ fun ReproductiveEventScreen(
                 TactileButton(
                     text = "Confirmar ${eventType.label}",
                     icon = Icons.Default.Save,
-                    enabled = formularioValido,
+                    enabled = puedeRegistrar && formularioValido,
                     onClick = { showConfirmModal = true },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+        }
         }
     }
 
@@ -577,6 +677,7 @@ fun ReproductiveEventScreen(
                             Text("Parto estimado (+114d): $fechaPartoProyectada", color = FieldPrimary, fontWeight = FontWeight.Bold)
                         }
                         ReproductiveEventType.PARTO -> {
+                            Text("Jaula Maternidad: ${jaulaMaternidad.ifBlank { jaulaActual }}")
                             Text("Vivos: $nacidosVivos • Muertos: $nacidosMuertos • Momias: $momificados")
                             Text("Peso camada: ${String.format(Locale.US, "%.1f", pesoCamadaKg)} Kg (Prom: ${String.format(Locale.US, "%.2f", promedioLechon)} Kg)")
                             Text("Asistencia: $asistenciaSeleccionada • Oxitocina: ${if (oxitocinaAplicada) "Sí" else "No"}")
@@ -623,6 +724,70 @@ fun ReproductiveEventScreen(
             }
         )
     }
+
+    if (showCerdaSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Cerda Reproductora",
+            subtitle = "Plantel reproductor sincronizado",
+            items = cerdasItems,
+            selectedId = crotal,
+            categories = cerdasItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            emptyMessage = "No hay cerdas sincronizadas.",
+            onSelect = { item ->
+                crotal = item.id
+                val found = catalogState.cerdas.firstOrNull { it.caravana.equals(item.id, ignoreCase = true) }
+                if (found != null) {
+                    jaulaActual = found.jaula.ifBlank { found.galpon }
+                }
+                showCerdaSheet = false
+            },
+            onDismiss = { showCerdaSheet = false }
+        )
+    }
+
+    if (showVerracoSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Verraco / Dosis Seminal",
+            subtitle = "Sementales y lotes de semen disponibles",
+            items = verracosItems,
+            selectedId = verracoCodigo,
+            onSelect = { item ->
+                verracoCodigo = item.id
+                showVerracoSheet = false
+            },
+            onDismiss = { showVerracoSheet = false }
+        )
+    }
+
+    if (showTecnicaSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Técnica de Inseminación Artificial",
+            subtitle = "Protocolo clínico de servicio",
+            items = tecnicasItems,
+            selectedId = tecnicaIa,
+            onSelect = { item ->
+                tecnicaIa = item.id
+                showTecnicaSheet = false
+            },
+            onDismiss = { showTecnicaSheet = false }
+        )
+    }
+
+    if (showJaulaMaternidadSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Jaula de Maternidad",
+            subtitle = "Jaulas parideras disponibles",
+            items = jaulasMaternidadItems,
+            selectedId = jaulaMaternidad,
+            categories = jaulasMaternidadItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                jaulaMaternidad = item.id
+                jaulaActual = item.id
+                showJaulaMaternidadSheet = false
+            },
+            onDismiss = { showJaulaMaternidadSheet = false }
+        )
+    }
 }
 
 @Composable
@@ -645,7 +810,10 @@ private fun CounterStepperRow(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = FieldOnSurface
+            color = FieldOnSurface,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
         )
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -662,13 +830,58 @@ private fun CounterStepperRow(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black,
                 color = accent,
-                fontSize = 18.sp
+                fontSize = 18.sp,
+                modifier = Modifier.widthIn(min = 28.dp),
+                textAlign = TextAlign.Center,
+                maxLines = 1
             )
             FilledTonalIconButton(
                 onClick = { onValueChange(value + 1) },
                 modifier = Modifier.size(34.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Aumentar", modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BodyConditionSelector(
+    selectedCondition: Int,
+    onSelect: (Int) -> Unit,
+    prefix: String = "CC "
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        (1..5).forEach { cc ->
+            val selected = selectedCondition == cc
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) FieldPrimary else FieldSurfaceContainerHigh)
+                    .border(
+                        BorderStroke(1.dp, if (selected) FieldPrimary else FieldOutlineVariant),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .selectable(selected = selected, role = Role.RadioButton) {
+                        onSelect(cc)
+                    }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$prefix$cc",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selected) Color.White else FieldOnSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

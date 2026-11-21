@@ -5,8 +5,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,8 +25,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.porciapp.data.local.entities.CatGalponEntity
+import com.example.porciapp.data.local.entities.CatHorarioEntity
 import com.example.porciapp.data.model.UserProfile
 import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.ui.theme.*
 
 /**
@@ -209,6 +216,7 @@ fun RoleContextBanner(
                 contentColor = FieldOnSurface,
                 minHeight = 40.dp,
                 shadowOffset = 2.dp,
+                compact = true,
                 modifier = Modifier.padding(start = 8.dp)
             )
         }
@@ -260,7 +268,9 @@ fun RoleSelectionDialog(
             shadowOffset = 4.dp
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Cabecera del diálogo
@@ -269,7 +279,10 @@ fun RoleSelectionDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -286,17 +299,21 @@ fun RoleSelectionDialog(
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Ficha de Turno Activo",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = FieldOnSurface
+                                color = FieldOnSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = currentRole.etiqueta,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = FieldOnSurfaceVariant
+                                color = FieldOnSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -322,38 +339,98 @@ fun RoleSelectionDialog(
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Usuario:", style = MaterialTheme.typography.labelSmall, color = FieldOnSurfaceVariant)
-                            Text(activeProfile.nombre, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = FieldOnSurface)
+                            Text(
+                                text = activeProfile.nombre,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = FieldOnSurface,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 12.dp)
+                            )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Rol Asignado:", style = MaterialTheme.typography.labelSmall, color = FieldOnSurfaceVariant)
-                            Text(currentRole.titulo, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = FieldPrimary)
+                            Text(
+                                text = currentRole.titulo,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = FieldPrimary,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 12.dp)
+                            )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Cargo / Área:", style = MaterialTheme.typography.labelSmall, color = FieldOnSurfaceVariant)
-                            Text(activeProfile.cargo, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = FieldOnSurface)
+                            Text(
+                                text = activeProfile.cargo,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = FieldOnSurface,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 12.dp)
+                            )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Identificación:", style = MaterialTheme.typography.labelSmall, color = FieldOnSurfaceVariant)
-                            Text(activeProfile.identificacion, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = FieldOnSurface)
+                            Text(
+                                text = activeProfile.identificacion,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = FieldOnSurface,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 12.dp)
+                            )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Granja:", style = MaterialTheme.typography.labelSmall, color = FieldOnSurfaceVariant)
-                            Text("Granja Porcina San José", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = FieldOnSurface)
+                            Text(
+                                text = "Granja Porcina San José",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = FieldOnSurface,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 12.dp)
+                            )
                         }
                     }
                 }
@@ -422,6 +499,7 @@ fun RoleSelectionDialog(
                             backgroundColor = FieldErrorContainer,
                             contentColor = FieldOnErrorContainer,
                             minHeight = 46.dp,
+                            compact = true,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -431,6 +509,7 @@ fun RoleSelectionDialog(
                         backgroundColor = FieldPrimaryContainer,
                         contentColor = FieldOnPrimary,
                         minHeight = 46.dp,
+                        compact = true,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -490,6 +569,326 @@ fun RoleRestrictionWarningBanner(
                         color = FieldDarkBorder.copy(alpha = 0.9f),
                         lineHeight = 14.sp
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Modal personalizable de espacio de trabajo por rol, acotado por los permisos RBAC del rol activo.
+ */
+@Composable
+fun CustomizeWorkspaceDialog(
+    activeRole: UserRole,
+    currentPrefs: WorkspaceUiPreferences,
+    galpones: List<CatGalponEntity>,
+    turnos: List<CatHorarioEntity>,
+    onSave: (WorkspaceUiPreferences) -> Unit,
+    onResetDefault: () -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    val allowedModules = remember(activeRole) { WorkspaceUiPreferences.allowedModulesFor(activeRole) }
+    val allowedActions = remember(activeRole) { WorkspaceUiPreferences.allowedActionsFor(activeRole) }
+    val allowedNavTabs = remember(activeRole) { WorkspaceUiPreferences.allowedNavTabsFor(activeRole) }
+
+    var galponSel by remember(currentPrefs) { mutableStateOf(currentPrefs.galponPredeterminado) }
+    var turnoSel by remember(currentPrefs) { mutableStateOf(currentPrefs.turnoPredeterminado) }
+    var modulosSel by remember(currentPrefs) { mutableStateOf(currentPrefs.modulosVisibles.ifEmpty { WorkspaceUiPreferences.defaultFor(activeRole).modulosVisibles }) }
+    var accionesSel by remember(currentPrefs) { mutableStateOf(currentPrefs.accionesRapidas.ifEmpty { WorkspaceUiPreferences.defaultFor(activeRole).accionesRapidas }) }
+    var navSel by remember(currentPrefs) { mutableStateOf(currentPrefs.navInferior.ifEmpty { WorkspaceUiPreferences.defaultFor(activeRole).navInferior }) }
+    var monedaSel by remember(currentPrefs) { mutableStateOf(if (activeRole.puedeVerCostos) currentPrefs.monedaPreferida else "NIO") }
+    var modoCompacto by remember(currentPrefs) { mutableStateOf(currentPrefs.modoCompacto) }
+
+    fun moduleLabel(key: String) = when (key) {
+        "ACCIONES_RAPIDAS" -> "Accesos Rápidos (2x2)"
+        "TAREAS_HOY" -> "Agenda & Tareas de Hoy"
+        "METRICAS_VIVO" -> "Resumen de Granja"
+        "SILOS_NIVEL" -> "Nivel de Silos & Bodega"
+        "BUSCADOR_CAMPO" -> "Buscador Rápido de Campo"
+        "RESUMEN_FINANCIERO" -> "Resumen Financiero (Admin)"
+        else -> key
+    }
+
+    fun actionLabel(key: String) = when (key) {
+        "FEED_SUPPLY" -> "Alimento"
+        "REPRODUCTIVE_EVENT" -> "Partos & IA"
+        "TREATMENT" -> "Sanidad"
+        "FIELD_OPERATIONS" -> if (activeRole == UserRole.OPERARIO) "Labores" else "Gastos/Labores"
+        "ANIMALS" -> "Animales"
+        "TASKS_SCHEDULE" -> "Agenda"
+        "MORTALITY" -> "Mortalidad"
+        else -> key
+    }
+
+    fun navLabel(key: String) = when (key) {
+        "DASHBOARD" -> "Inicio (Fijo)"
+        "FEED_SUPPLY" -> "Alimento"
+        "FIELD_OPERATIONS" -> if (activeRole == UserRole.OPERARIO) "Labores" else "Gastos"
+        "TASKS_SCHEDULE" -> "Tareas"
+        "TREATMENT" -> "Sanidad"
+        "ANIMALS" -> "Cerdos"
+        "REPRODUCTIVE_EVENT" -> "Partos"
+        "MORTALITY" -> "Bajas"
+        else -> key
+    }
+
+    Dialog(onDismissRequest = onDismissRequest) {
+        TactileCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = FieldSurfaceContainerLowest,
+            shadowOffset = 4.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 600.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Personalizar Vista (${activeRole.titulo})",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = FieldOnSurface
+                        )
+                        Text(
+                            text = "Se guarda en SQLite y se sincroniza con tu cuenta.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = FieldOnSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDismissRequest) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar")
+                    }
+                }
+
+                HorizontalDivider(color = FieldOutlineVariant)
+
+                // Galpón predeterminado
+                Text(
+                    text = "GALPÓN PREDETERMINADO",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = FieldPrimary
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item {
+                        FilterChip(
+                            selected = galponSel.isBlank(),
+                            onClick = { galponSel = "" },
+                            label = { Text("Toda la Granja") }
+                        )
+                    }
+                    items(galpones, key = { it.codigo }) { g ->
+                        FilterChip(
+                            selected = galponSel.equals(g.codigo, ignoreCase = true),
+                            onClick = { galponSel = g.codigo },
+                            label = { Text(g.nombre) }
+                        )
+                    }
+                }
+
+                // Turno predeterminado
+                if (turnos.isNotEmpty()) {
+                    Text(
+                        text = "TURNO HABITUAL DE JORNADA",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = FieldPrimary
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(turnos, key = { it.codigo }) { t ->
+                            FilterChip(
+                                selected = turnoSel.equals(t.codigo, ignoreCase = true),
+                                onClick = { turnoSel = t.codigo },
+                                label = { Text("${t.nombre.substringBefore(" (")} (${t.horaInicio})") }
+                            )
+                        }
+                    }
+                }
+
+                // Secciones visibles
+                Text(
+                    text = "SECCIONES VISIBLES EN INICIO",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = FieldPrimary
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    allowedModules.forEach { key ->
+                        val checked = key in modulosSel
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(FieldSurfaceContainerLow)
+                                .clickable {
+                                    modulosSel = if (checked) {
+                                        val next = modulosSel - key
+                                        if (next.isEmpty()) modulosSel else next
+                                    } else modulosSel + key
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = moduleLabel(key),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = FieldOnSurface
+                            )
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { on ->
+                                    modulosSel = if (on) (modulosSel + key).distinct()
+                                    else (modulosSel - key).ifEmpty { modulosSel }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // 4 Acciones rápidas
+                Text(
+                    text = "ACCIONES RÁPIDAS FAVORITAS (${accionesSel.size}/4)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = FieldPrimary
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(allowedActions, key = { it }) { key ->
+                        val selected = key in accionesSel
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                accionesSel = if (selected) {
+                                    if (accionesSel.size > 1) accionesSel - key else accionesSel
+                                } else {
+                                    (accionesSel + key).take(4)
+                                }
+                            },
+                            label = { Text(actionLabel(key)) }
+                        )
+                    }
+                }
+
+                // 4 Pestañas barra inferior
+                Text(
+                    text = "BARRA INFERIOR (${navSel.size}/4)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = FieldPrimary
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(allowedNavTabs, key = { it }) { key ->
+                        val selected = key in navSel
+                        FilterChip(
+                            selected = selected,
+                            enabled = key != "DASHBOARD",
+                            onClick = {
+                                if (key == "DASHBOARD") return@FilterChip
+                                navSel = if (selected) {
+                                    if (navSel.size > 2) navSel - key else navSel
+                                } else {
+                                    (navSel + key).take(4)
+                                }
+                            },
+                            label = { Text(navLabel(key)) }
+                        )
+                    }
+                }
+
+                // Modo compacto + Moneda Admin
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(FieldSurfaceContainerLow)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Modo Compacto (Tarjetas densas)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = FieldOnSurface
+                    )
+                    Switch(checked = modoCompacto, onCheckedChange = { modoCompacto = it })
+                }
+
+                if (activeRole.puedeVerCostos) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Moneda:",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = FieldOnSurface
+                        )
+                        FilterChip(
+                            selected = monedaSel == "NIO",
+                            onClick = { monedaSel = "NIO" },
+                            label = { Text("Córdobas (C$)") }
+                        )
+                        FilterChip(
+                            selected = monedaSel == "USD",
+                            onClick = { monedaSel = "USD" },
+                            label = { Text("Dólares ($)") }
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = FieldOutlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onResetDefault()
+                            onDismissRequest()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Por rol", maxLines = 1)
+                    }
+                    Button(
+                        onClick = {
+                            onSave(
+                                currentPrefs.copy(
+                                    rolBase = activeRole,
+                                    galponPredeterminado = galponSel,
+                                    turnoPredeterminado = turnoSel,
+                                    modulosVisibles = modulosSel,
+                                    accionesRapidas = accionesSel,
+                                    navInferior = navSel,
+                                    monedaPreferida = monedaSel,
+                                    modoCompacto = modoCompacto
+                                ).sanitizedFor(activeRole)
+                            )
+                            onDismissRequest()
+                        },
+                        modifier = Modifier.weight(1.4f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Guardar Vista", maxLines = 1)
+                    }
                 }
             }
         }

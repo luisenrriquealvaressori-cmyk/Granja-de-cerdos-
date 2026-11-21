@@ -6,9 +6,15 @@
     var invCulture = System.Globalization.CultureInfo.InvariantCulture;
     var centrosJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.BarrasCentroCosto);
     var flujoJson = System.Text.Json.JsonSerializer.Serialize(Model.Data.BarrasMensuales);
+    var pref = Model.PreferenciasUi ?? new WEB.Services.PreferenciasUiUsuarioDto();
+    var modulos = pref.ModulosVisibles ?? new List<string>();
+    bool HasMod(string key) => modulos.Count == 0 || modulos.Contains(key);
+    var monedaPref = RoleService.EsAdmin && string.Equals(pref.MonedaPreferida, "USD", StringComparison.OrdinalIgnoreCase) ? "USD" : (RoleService.EsAdmin ? pref.MonedaPreferida : "NIO");
+    var compactGap = pref.ModoCompacto ? "gap-3" : "gap-5";
+    var compactPad = pref.ModoCompacto ? "p-3 sm:p-4" : "p-4 sm:p-6";
 }
 
-<div class="p-4 sm:p-6 max-w-[1440px] mx-auto flex flex-col gap-5">
+<div class="@compactPad max-w-[1440px] mx-auto flex flex-col @compactGap">
     <!-- Encabezado y Controles -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
         <div>
@@ -17,16 +23,26 @@
                     Granja Porcina San José
                 </span>
                 <span class="text-[11px] text-on-surface-variant font-semibold">Motor en vivo PostgreSQL</span>
+                @if (!string.IsNullOrWhiteSpace(pref.GalponPredeterminado))
+                {
+                    <span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface">
+                        Galpón: @pref.GalponPredeterminado
+                    </span>
+                }
             </div>
             <h1 class="font-headline text-xl sm:text-2xl font-extrabold text-on-surface mt-1">
                 Consola de Lógica Zootécnica &amp; Costes
             </h1>
             <p class="text-xs text-on-surface-variant">
-                Indicadores biológicos (ICA, GMD, ciclo 114d), sincronización móvil de campo y rentabilidad bimonetaria.
+                Indicadores biológicos (ICA, GMD, ciclo 114d), sincronización móvil de campo y vista personalizable por rol.
             </p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+            <button type="button" onclick="abrirModalPersonalizarUi()" class="inline-flex items-center gap-1.5 bg-surface-container-low border border-outline-variant text-on-surface px-3 py-2 rounded-xl text-xs font-bold hover:bg-surface-container transition">
+                <span class="material-symbols-outlined text-[16px]">tune</span>
+                <span>Personalizar Vista</span>
+            </button>
             @if (RoleService.EsAdmin)
             {
                 <div class="inline-flex rounded-xl border border-outline-variant bg-surface-container-low p-1 text-xs font-bold" role="group" aria-label="Selector de moneda">
@@ -38,22 +54,66 @@
                     <span>Centro de Costes</span>
                 </a>
             }
-            else
+            else if (RoleService.EsVeterinario)
             {
                 <a href="/Reproduccion" class="inline-flex items-center gap-1.5 bg-teal-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-teal-800 transition shadow-xs">
                     <span class="material-symbols-outlined text-[16px]">child_care</span>
                     <span>Ciclo 114d &amp; Partos</span>
                 </a>
-                <a href="/Calendario" class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-outline-variant text-on-surface px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-surface-container-low transition">
+                <a href="/Cerdos" class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-teal-200 text-teal-900 px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-teal-50 transition">
+                    <span class="material-symbols-outlined text-[16px]">vaccines</span>
+                    <span>Padrón &amp; Plan Vacunal</span>
+                </a>
+                <a href="/Calendario?Rol=Veterinario" class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-outline-variant text-on-surface px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-surface-container-low transition">
                     <span class="material-symbols-outlined text-[16px]">calendar_month</span>
-                    <span>Tareas &amp; Labores</span>
+                    <span>Agenda Clínica</span>
+                </a>
+            }
+            else
+            {
+                <a href="/Inventario#form-kardex" class="inline-flex items-center gap-1.5 bg-amber-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-amber-900 transition shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">inventory_2</span>
+                    <span>Recepción Silos &amp; Bodega</span>
+                </a>
+                <a href="/Calendario" class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-outline-variant text-on-surface px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-surface-container-low transition">
+                    <span class="material-symbols-outlined text-[16px]">task_alt</span>
+                    <span>Mis Tareas &amp; Labores</span>
+                </a>
+                <a href="/Cerdos" class="inline-flex items-center gap-1.5 bg-surface-container-lowest border border-outline-variant text-on-surface px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-surface-container-low transition">
+                    <span class="material-symbols-outlined text-[16px]">pets</span>
+                    <span>Padrón de Cerdos</span>
                 </a>
             }
         </div>
     </div>
 
+    <!-- Barra rápida 1-clic de Galpón (filtrada en PostgreSQL según rol) -->
+    @if (Model.GalponesSelector.Count > 0)
+    {
+        <div class="flex flex-wrap items-center gap-1.5 bg-surface-container-lowest border border-outline-variant rounded-2xl px-3.5 py-2.5 shadow-2xs text-xs">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-outline mr-1 flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">filter_alt</span>
+                <span>Nave / Galpón:</span>
+            </span>
+            <a href="/?GalponFiltro=ALL"
+               class="px-2.5 py-1 rounded-full font-bold transition @(string.IsNullOrWhiteSpace(Model.GalponFiltroActivo) ? "bg-primary text-on-primary" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container")">
+                Todas las Naves
+            </a>
+            @foreach (var g in Model.GalponesSelector)
+            {
+                var activoG = string.Equals(Model.GalponFiltroActivo, g.Codigo, StringComparison.OrdinalIgnoreCase);
+                <a href="/?GalponFiltro=@Uri.EscapeDataString(g.Codigo)"
+                   class="px-2.5 py-1 rounded-full font-semibold transition @(activoG ? "bg-primary text-on-primary font-bold" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container")">
+                    @g.Nombre
+                </a>
+            }
+        </div>
+    }
+
     <!-- Fila de 4 KPIs Reales (adaptados por rol) -->
-    @if (RoleService.EsAdmin)
+    @if (HasMod("METRICAS_VIVO"))
+    {
+        @if (RoleService.EsAdmin)
     {
         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col justify-between">
@@ -111,18 +171,9 @@
             </div>
         </div>
     }
-    else
+    else if (RoleService.EsVeterinario)
     {
         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
-                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
-                    <span>LOTES &amp; GMD PROMEDIO</span>
-                    <span class="material-symbols-outlined text-primary">pets</span>
-                </div>
-                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.LotesActivosCount lotes</div>
-                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Ganancia diaria promedio: <strong>@Model.Data.GmdPromedio g/día</strong></div>
-            </div>
-
             <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
                 <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
                     <span>FERTILIDAD &amp; CAMADA</span>
@@ -134,7 +185,38 @@
 
             <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
                 <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
-                    <span>TAREAS &amp; LABORES HOY</span>
+                    <span>SANIDAD CLÍNICA (MES)</span>
+                    <span class="material-symbols-outlined text-teal-700">vaccines</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.TratamientosAplicadosMes <span class="text-sm font-bold text-on-surface-variant">aplic.</span></div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Dosis: <strong>@Model.Data.DosisMedicamentosMlMes.ToString("N0") ml</strong> • Pacientes: <strong>@Model.Data.AnimalesBajoTratamiento</strong></div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>LOTES &amp; GMD PROMEDIO</span>
+                    <span class="material-symbols-outlined text-primary">pets</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.LotesActivosCount lotes</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Ganancia diaria promedio: <strong>@Model.Data.GmdPromedio g/día</strong></div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>AGENDA CLÍNICA &amp; JAULAS</span>
+                    <span class="material-symbols-outlined text-primary">task_alt</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.TareasCompletadasHoy / @(Model.Data.TareasCompletadasHoy + Model.Data.TareasPendientesHoy)</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Pendientes hoy: <strong>@Model.Data.TareasPendientesHoy</strong> • Ocupación: <strong>@Model.Data.JaulasOcupadas/@Model.Data.JaulasTotales</strong></div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>MIS TAREAS DE CAMPO HOY</span>
                     <span class="material-symbols-outlined text-primary">task_alt</span>
                 </div>
                 <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.TareasCompletadasHoy / @(Model.Data.TareasCompletadasHoy + Model.Data.TareasPendientesHoy)</div>
@@ -143,17 +225,36 @@
 
             <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
                 <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
-                    <span>SILOS &amp; SANIDAD DEL MES</span>
-                    <span class="material-symbols-outlined text-amber-700">vaccines</span>
+                    <span>ALIMENTO SUMINISTRADO HOY</span>
+                    <span class="material-symbols-outlined text-amber-700">scale</span>
                 </div>
-                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.ToneladasSilo.ToString("N2") t</div>
-                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Hoy: <strong>@Model.Data.AlimentoSuministradoHoyKg.ToString("N1") Kg</strong> • Aplicaciones mes: <strong>@Model.Data.TratamientosAplicadosMes</strong></div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.AlimentoSuministradoHoyKg.ToString("N1") Kg</div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Despacho registrado en tolvas y bodega</div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>RESERVA EN SILOS</span>
+                    <span class="material-symbols-outlined text-amber-700">warehouse</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.ToneladasSilo.ToString("N2") t <span class="text-xs font-bold text-on-surface-variant">(@Model.Data.PorcentajeCapacidadSilos%)</span></div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Disponibilidad física en planta</div>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs">
+                <div class="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                    <span>CORRALES &amp; LOTES ACTIVOS</span>
+                    <span class="material-symbols-outlined text-primary">pets</span>
+                </div>
+                <div class="mt-2 font-headline text-2xl font-extrabold text-on-surface tabular-nums">@Model.Data.JaulasOcupadas / @Model.Data.JaulasTotales <span class="text-xs font-bold text-on-surface-variant">cabs.</span></div>
+                <div class="mt-1 text-[11px] text-on-surface-variant font-semibold">Lotes en nave: <strong>@Model.Data.LotesActivosCount</strong> • GMD prom.: <strong>@Model.Data.GmdPromedio g/d</strong></div>
             </div>
         </div>
     }
+    }
 
     <!-- Bloque Analítico de Costes (Solo Administrador) -->
-    @if (RoleService.EsAdmin)
+    @if (RoleService.EsAdmin && HasMod("RESUMEN_FINANCIERO"))
     {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-3">
@@ -203,7 +304,11 @@
     }
 
     <!-- Bloque de Lógica Zootécnica en Vivo -->
+    @if (HasMod("METRICAS_VIVO") || HasMod("ACCIONES_RAPIDAS") || HasMod("SILOS_NIVEL"))
+    {
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        @if (HasMod("METRICAS_VIVO"))
+        {
         <!-- Eficiencia Biológica por Lote -->
         <section class="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-3">
             <div class="flex items-center justify-between">
@@ -269,9 +374,14 @@
                 </div>
             }
         </section>
+        }
 
         <!-- Radar Gestación 114d & Estado de Silos -->
-        <section class="lg:col-span-5 flex flex-col gap-4">
+        @if (((RoleService.EsAdmin || RoleService.EsVeterinario) && HasMod("ACCIONES_RAPIDAS")) || HasMod("SILOS_NIVEL"))
+        {
+        <section class="@(HasMod("METRICAS_VIVO") ? "lg:col-span-5" : "lg:col-span-12") flex flex-col gap-4">
+            @if ((RoleService.EsAdmin || RoleService.EsVeterinario) && HasMod("ACCIONES_RAPIDAS"))
+            {
             <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
                 <div class="flex items-center justify-between">
                     <h2 class="font-headline text-sm font-extrabold text-on-surface">Radar de Partos (Ciclo 114 Días)</h2>
@@ -299,7 +409,10 @@
                     </div>
                 }
             </div>
+            }
 
+            @if (HasMod("SILOS_NIVEL"))
+            {
             <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
                 <div class="flex items-center justify-between">
                     <h2 class="font-headline text-sm font-extrabold text-on-surface">Silos de Alimento</h2>
@@ -328,11 +441,18 @@
                     </div>
                 }
             </div>
+            }
         </section>
+        }
     </div>
+    }
 
     <!-- Sincronización Móvil de Tareas/Labores y Alertas -->
+    @if (HasMod("TAREAS_HOY") || HasMod("BUSCADOR_CAMPO"))
+    {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        @if (HasMod("TAREAS_HOY"))
+        {
         <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
             <div class="flex items-center justify-between">
                 <h2 class="font-headline text-sm font-extrabold text-on-surface">Tareas y Labores de Campo (Hoy)</h2>
@@ -354,15 +474,30 @@
                                 <div class="font-bold text-on-surface truncate">@t.Titulo</div>
                                 <div class="text-[11px] text-on-surface-variant truncate">@t.HoraProgramada • @t.GalponNombre @t.LoteCodigo • @t.AsignadoANombre</div>
                             </div>
-                            <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border @(t.EstaCompletada ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-amber-100 text-amber-800 border-amber-300")">
-                                @(t.EstaCompletada ? "Completada" : "Pendiente")
-                            </span>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                @if (!t.EstaCompletada)
+                                {
+                                    <form method="post" asp-page-handler="CompletarTareaRapida" class="inline">
+                                        <input type="hidden" name="id" value="@t.Id" />
+                                        <input type="hidden" name="galponFiltro" value="@Model.GalponFiltroActivo" />
+                                        <button type="submit" class="px-2 py-0.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-bold transition">
+                                            Completar
+                                        </button>
+                                    </form>
+                                }
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border @(t.EstaCompletada ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-amber-100 text-amber-800 border-amber-300")">
+                                    @(t.EstaCompletada ? "Completada" : "Pendiente")
+                                </span>
+                            </div>
                         </div>
                     }
                 </div>
             }
         </section>
+        }
 
+        @if (HasMod("BUSCADOR_CAMPO"))
+        {
         <section class="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-xs flex flex-col gap-2.5">
             <div class="flex items-center justify-between">
                 <h2 class="font-headline text-sm font-extrabold text-on-surface">Alertas Lógicas &amp; Sanitarias</h2>
@@ -393,10 +528,174 @@
                 </div>
             }
         </section>
+        }
+    </div>
+    }
+</div>
+
+<!-- MODAL: PERSONALIZAR VISTA POR ROL -->
+<div id="modal-personalizar-ui" class="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] hidden items-center justify-center p-4">
+    <div class="bg-surface-container-lowest border border-outline-variant rounded-2xl max-w-lg w-full p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-outline-variant pb-3 mb-4">
+            <div>
+                <h2 class="font-headline text-base font-extrabold text-on-surface">Personalizar Interfaz (@pref.RolBase)</h2>
+                <p class="text-[11px] text-on-surface-variant">Configuración persistida en PostgreSQL y sincronizada con tus permisos de rol.</p>
+            </div>
+            <button type="button" onclick="cerrarModalPersonalizarUi()" class="p-1 rounded-lg text-on-surface-variant hover:text-on-surface">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+
+        <div class="flex flex-col gap-4 text-xs">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold mb-1 text-on-surface">Galpón Predeterminado</label>
+                    <select id="ui-pref-galpon" class="w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        <option value="">Toda la Granja</option>
+                        @foreach (var g in Model.GalponesSelector)
+                        {
+                            <option value="@g.Codigo" selected="@(pref.GalponPredeterminado == g.Codigo)">@g.Nombre (@g.TipoSistema)</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold mb-1 text-on-surface">Turno Habitual</label>
+                    <select id="ui-pref-turno" class="w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                        @foreach (var t in Model.TurnosSelector)
+                        {
+                            <option value="@t.Codigo" selected="@(pref.TurnoPredeterminado == t.Codigo)">@t.Nombre</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <span class="block font-bold mb-1.5 text-on-surface">Secciones Visibles en el Tablero</span>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant bg-surface-container-low cursor-pointer">
+                        <input type="checkbox" class="ui-mod-check rounded text-primary" value="METRICAS_VIVO" @(HasMod("METRICAS_VIVO") ? "checked" : "") />
+                        <span class="font-semibold">KPIs y Semáforo ICA</span>
+                    </label>
+                    @if (RoleService.EsAdmin || RoleService.EsVeterinario)
+                    {
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant bg-surface-container-low cursor-pointer">
+                            <input type="checkbox" class="ui-mod-check rounded text-primary" value="ACCIONES_RAPIDAS" @(HasMod("ACCIONES_RAPIDAS") ? "checked" : "") />
+                            <span class="font-semibold">Radar de Partos (114d)</span>
+                        </label>
+                    }
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant bg-surface-container-low cursor-pointer">
+                        <input type="checkbox" class="ui-mod-check rounded text-primary" value="SILOS_NIVEL" @(HasMod("SILOS_NIVEL") ? "checked" : "") />
+                        <span class="font-semibold">Nivel de Silos</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant bg-surface-container-low cursor-pointer">
+                        <input type="checkbox" class="ui-mod-check rounded text-primary" value="TAREAS_HOY" @(HasMod("TAREAS_HOY") ? "checked" : "") />
+                        <span class="font-semibold">Agenda &amp; Tareas de Hoy</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant bg-surface-container-low cursor-pointer">
+                        <input type="checkbox" class="ui-mod-check rounded text-primary" value="BUSCADOR_CAMPO" @(HasMod("BUSCADOR_CAMPO") ? "checked" : "") />
+                        <span class="font-semibold">Alertas Sanitarias</span>
+                    </label>
+                    @if (RoleService.EsAdmin)
+                    {
+                        <label class="flex items-center gap-2 p-2.5 rounded-xl border border-primary/40 bg-primary-fixed/25 cursor-pointer">
+                            <input type="checkbox" class="ui-mod-check rounded text-primary" value="RESUMEN_FINANCIERO" @(HasMod("RESUMEN_FINANCIERO") ? "checked" : "") />
+                            <span class="font-semibold text-primary">Gráficos Costos (Admin)</span>
+                        </label>
+                    }
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <label class="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant bg-surface-container-low cursor-pointer">
+                    <input type="checkbox" id="ui-pref-compacto" class="rounded text-primary" @(pref.ModoCompacto ? "checked" : "") />
+                    <span class="font-semibold">Modo Compacto de Tablero</span>
+                </label>
+
+                @if (RoleService.EsAdmin)
+                {
+                    <div>
+                        <label class="block font-bold mb-1 text-on-surface">Moneda Preferida</label>
+                        <select id="ui-pref-moneda" class="w-full rounded-xl border border-outline-variant bg-surface px-3 py-2 font-semibold">
+                            <option value="NIO" selected="@(monedaPref == "NIO")">Córdobas (C$)</option>
+                            <option value="USD" selected="@(monedaPref == "USD")">Dólares ($ USD)</option>
+                        </select>
+                    </div>
+                }
+            </div>
+
+            <div id="ui-pref-error" class="hidden p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-[11px] font-semibold"></div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-outline-variant">
+                <button type="button" onclick="restablecerPreferenciasUi()" class="px-3 py-2 rounded-xl border border-outline-variant font-bold text-on-surface-variant hover:bg-surface-container-low">
+                    Restablecer por rol
+                </button>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="cerrarModalPersonalizarUi()" class="px-3 py-2 rounded-xl border border-outline-variant font-bold">Cancelar</button>
+                    <button type="button" onclick="guardarPreferenciasUi()" class="px-4 py-2 rounded-xl bg-primary text-on-primary font-bold hover:bg-secondary">Guardar Preferencias</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
 @section Scripts {
+    <script>
+        const currentUiPrefs = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(pref, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }));
+
+        function abrirModalPersonalizarUi() {
+            const m = document.getElementById('modal-personalizar-ui');
+            if (m) { m.classList.remove('hidden'); m.classList.add('flex'); }
+        }
+        function cerrarModalPersonalizarUi() {
+            const m = document.getElementById('modal-personalizar-ui');
+            if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+        }
+        async function enviarPreferenciasUi(payload) {
+            const err = document.getElementById('ui-pref-error');
+            if (err) err.classList.add('hidden');
+            try {
+                const res = await fetch('/api/v1/preferencias-ui', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                window.location.reload();
+            } catch (e) {
+                if (err) {
+                    err.textContent = 'No se pudieron guardar las preferencias (' + e.message + ').';
+                    err.classList.remove('hidden');
+                }
+            }
+        }
+        function guardarPreferenciasUi() {
+            const modulos = Array.from(document.querySelectorAll('.ui-mod-check:checked')).map(c => c.value);
+            const monedaSel = document.getElementById('ui-pref-moneda');
+            const payload = {
+                ...currentUiPrefs,
+                galponPredeterminado: document.getElementById('ui-pref-galpon')?.value || '',
+                turnoPredeterminado: document.getElementById('ui-pref-turno')?.value || currentUiPrefs.turnoPredeterminado,
+                modulosVisibles: modulos,
+                modoCompacto: !!document.getElementById('ui-pref-compacto')?.checked,
+                monedaPreferida: monedaSel ? monedaSel.value : 'NIO',
+                updatedAtMs: Date.now()
+            };
+            enviarPreferenciasUi(payload);
+        }
+        function restablecerPreferenciasUi() {
+            enviarPreferenciasUi({
+                rolBase: currentUiPrefs.rolBase,
+                modulosVisibles: [],
+                accionesRapidas: [],
+                navInferior: [],
+                galponPredeterminado: '',
+                turnoPredeterminado: '',
+                monedaPreferida: 'NIO',
+                modoCompacto: false,
+                updatedAtMs: Date.now()
+            });
+        }
+    </script>
     @if (RoleService.EsAdmin)
     {
         <script>
@@ -405,7 +704,7 @@
             const flujoData = @Html.Raw(flujoJson);
             let chartCentros = null;
             let chartFlujo = null;
-            let monedaActiva = 'USD';
+            let monedaActiva = '@monedaPref';
 
             function factorMoneda() { return monedaActiva === 'NIO' ? TASA_CAMBIO : 1; }
             function simboloMoneda() { return monedaActiva === 'NIO' ? 'C$ ' : '$ '; }
@@ -503,7 +802,7 @@
                 }
             }
 
-            document.addEventListener('DOMContentLoaded', renderCharts);
+            document.addEventListener('DOMContentLoaded', () => setMonedaConsola(monedaActiva));
         </script>
     }
 }

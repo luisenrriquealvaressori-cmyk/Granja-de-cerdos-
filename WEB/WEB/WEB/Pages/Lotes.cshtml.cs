@@ -8,10 +8,12 @@ namespace WEB.Pages;
 public class LotesModel : PageModel
 {
     private readonly AgroPigDataService _dataService;
+    private readonly UserRoleService _roleService;
 
-    public LotesModel(AgroPigDataService dataService)
+    public LotesModel(AgroPigDataService dataService, UserRoleService roleService)
     {
         _dataService = dataService;
+        _roleService = roleService;
     }
 
     public LotesPageViewModel Data { get; set; } = new();
@@ -21,7 +23,7 @@ public class LotesModel : PageModel
 
     public async Task OnGetAsync()
     {
-        Data = await _dataService.GetLotesPlanningDataAsync();
+        Data = await _dataService.GetLotesPlanningDataAsync(_roleService.CurrentRoleName);
     }
 
     [RequierePolitica(Policies.LotesGestionar)]

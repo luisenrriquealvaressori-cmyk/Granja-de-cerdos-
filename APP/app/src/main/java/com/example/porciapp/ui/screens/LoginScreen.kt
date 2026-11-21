@@ -63,9 +63,11 @@ fun LoginScreen(
     var isLoading by remember { mutableStateOf(false) }
 
     // Diálogos de configuración de servidor y cambio obligatorio de clave
+    val currentServerUrl by sessionManager.serverUrlFlow.collectAsState()
+    val isCloudServer = currentServerUrl.startsWith("https://", ignoreCase = true)
     var showServerConfigDialog by remember { mutableStateOf(false) }
     var showPasswordChangeDialog by remember { mutableStateOf(false) }
-    var serverUrlInput by remember { mutableStateOf(sessionManager.serverUrl()) }
+    var serverUrlInput by remember { mutableStateOf(currentServerUrl) }
 
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -84,6 +86,7 @@ fun LoginScreen(
         errorMessage = null
 
         coroutineScope.launch {
+            val activeServerUrl = sessionManager.serverUrl()
             when (val result = apiClient.login(userName.trim(), password)) {
                 is ApiResult.Ok -> {
                     val session = result.value
@@ -98,7 +101,15 @@ fun LoginScreen(
                 is ApiResult.Fail -> {
                     isLoading = false
                     errorMessage = when (result.kind) {
-                        ApiResult.Kind.NETWORK -> "Servidor local no detectado en ${sessionManager.serverUrl()}. Verifica la red Wi-Fi de la granja o la dirección del servidor."
+                        ApiResult.Kind.NETWORK -> {
+                            if (activeServerUrl.contains("onrender.com", ignoreCase = true) ||
+                                activeServerUrl.startsWith("https://", ignoreCase = true)
+                            ) {
+                                "No se pudo conectar con $activeServerUrl. Verifica tus datos/Wi-Fi o reintenta en unos segundos mientras despierta el servidor en Render."
+                            } else {
+                                "Servidor local no detectado en $activeServerUrl. Verifica la red Wi-Fi o pulsa en 'Servidor ⚙️' para cambiar a la nube Render."
+                            }
+                        }
                         ApiResult.Kind.UNAUTHORIZED -> "Credenciales incorrectas. Verifica el usuario y la contraseña."
                         ApiResult.Kind.PASSWORD_CHANGE_REQUIRED -> {
                             showPasswordChangeDialog = true
@@ -115,30 +126,35 @@ fun LoginScreen(
     Scaffold(
         containerColor = FieldBackground
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .imePadding()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .imePadding(),
+            contentAlignment = Alignment.Center
         ) {
-            // 1. Logo Badge Central con Identidad Rural Moderna
-            Box(
+            Column(
                 modifier = Modifier
-                    .size(96.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(FieldSecondaryFixed)
-                    .border(BorderStroke(1.5.dp, FieldPrimary.copy(alpha = 0.4f)), RoundedCornerShape(24.dp))
-                    .padding(10.dp),
+                    .widthIn(max = 460.dp)
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // 1. Logo Badge Central con Identidad Rural Moderna
+                Box(
+                    modifier = Modifier
+                        .size(84.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF283A13))
+                        .border(BorderStroke(1.5.dp, FieldPrimary.copy(alpha = 0.55f)), RoundedCornerShape(20.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.ic_porky_badge),
+                    painter = painterResource(id = R.drawable.app_logo),
                     contentDescription = "Logo Porky Gestión",
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -171,7 +187,7 @@ fun LoginScreen(
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(1.dp, FieldDarkBorder.copy(alpha = 0.4f)),
                 modifier = Modifier.clickable {
-                    serverUrlInput = sessionManager.serverUrl()
+                    serverUrlInput = currentServerUrl
                     showServerConfigDialog = true
                 }
             ) {
@@ -184,19 +200,24 @@ fun LoginScreen(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(FieldGreenPositive)
+                            .background(if (isCloudServer) FieldGreenPositive else FieldOrangeWarning)
                     )
                     Icon(
-                        imageVector = Icons.Default.Dns,
+                        imageVector = if (isCloudServer) Icons.Default.CloudQueue else Icons.Default.Dns,
                         contentDescription = null,
                         tint = FieldPrimary,
                         modifier = Modifier.size(14.dp)
                     )
+                    val displayHost = currentServerUrl
+                        .removePrefix("https://")
+                        .removePrefix("http://")
                     Text(
-                        text = "Servidor: ${sessionManager.serverUrl().removePrefix("http://")}",
+                        text = if (isCloudServer) "Nube: $displayHost" else "Local: $displayHost",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = FieldOnSurface
+                        color = FieldOnSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Icon(
                         imageVector = Icons.Default.Settings,
@@ -362,7 +383,7 @@ fun LoginScreen(
                     // Botón Principal de Entrada
                     TactileButton(
                         onClick = { performLogin() },
-                        text = if (isLoading) "Conectando..." else "Iniciar Turno",
+                        text = if (isLoading) "Conectando con servidor..." else "Iniciar Turno",
                         icon = if (isLoading) Icons.Default.HourglassEmpty else Icons.Default.Login,
                         backgroundColor = FieldPrimaryContainer,
                         contentColor = FieldOnPrimary,
@@ -370,6 +391,16 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isLoading
                     )
+
+                    if (isLoading && currentServerUrl.contains("onrender.com", ignoreCase = true)) {
+                        Text(
+                            text = "Si el servidor en Render estaba inactivo, el primer acceso puede tardar hasta 40 s.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = FieldOnSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 
@@ -435,7 +466,9 @@ fun LoginScreen(
                                         text = label,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = if (isSelected) Color.White else accentColor
+                                        color = if (isSelected) Color.White else accentColor,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = subLabel,
@@ -474,6 +507,7 @@ fun LoginScreen(
                 )
             }
         }
+        }
     }
 
     // Modal para Configurar URL del Servidor
@@ -484,7 +518,9 @@ fun LoginScreen(
                 backgroundColor = FieldSurfaceContainerLowest
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
@@ -507,7 +543,7 @@ fun LoginScreen(
                     }
 
                     Text(
-                        text = "Indica la dirección IP y puerto del servidor AgroPig en tu red local o emulador:",
+                        text = "Indica la dirección del servidor AgroPig (Nube Render HTTPS o servidor local):",
                         style = MaterialTheme.typography.bodySmall,
                         color = FieldOnSurfaceVariant
                     )
@@ -516,24 +552,50 @@ fun LoginScreen(
                         value = serverUrlInput,
                         onValueChange = { serverUrlInput = it },
                         label = { Text("URL del Servidor") },
+                        placeholder = { Text(SessionManager.DEFAULT_SERVER) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         AssistChip(
-                            onClick = { serverUrlInput = "http://10.0.2.2:5153" },
-                            label = { Text("Emulador (5153)", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
+                            onClick = { serverUrlInput = SessionManager.DEFAULT_SERVER },
+                            label = {
+                                Text(
+                                    "Nube Render (${SessionManager.DEFAULT_SERVER.removePrefix("https://")})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.CloudQueue,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        AssistChip(
-                            onClick = { serverUrlInput = "http://localhost:5153" },
-                            label = { Text("Localhost", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            AssistChip(
+                                onClick = { serverUrlInput = SessionManager.LEGACY_LAN_SERVER },
+                                label = { Text("Red Local", fontSize = 10.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            AssistChip(
+                                onClick = { serverUrlInput = "http://10.0.2.2:5153" },
+                                label = { Text("Emulador", fontSize = 10.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
 
                     Row(

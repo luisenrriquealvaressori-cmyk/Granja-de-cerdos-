@@ -1,7 +1,9 @@
 @page
 @model WEB.Pages.ComprasModel
+@inject WEB.Services.UserRoleService RoleService
 @{
-    ViewData["Title"] = "Compras, Proveedores & Catálogo - AgroPig Suite";
+    var verCostos = RoleService.EsAdmin;
+    ViewData["Title"] = verCostos ? "Compras, Proveedores & Catálogo - AgroPig Suite" : "Catálogo & Requisiciones Técnicas - AgroPig Suite";
 }
 
 <div class="flex flex-col gap-6">
@@ -10,28 +12,35 @@
         <div>
             <div class="flex items-center gap-2 text-xs font-semibold text-primary uppercase tracking-wider mb-1">
                 <span class="material-symbols-outlined text-[16px]">shopping_cart</span>
-                <span>Abastecimiento &amp; Logística Agropecuaria</span>
+                <span>@(verCostos ? "Abastecimiento & Logística Agropecuaria" : "Abastecimiento Clínico & Sanitario")</span>
             </div>
             <h1 class="text-2xl font-headline font-bold text-on-surface flex items-center gap-2.5">
-                <span>Catálogo de Productos &amp; Órdenes de Compra</span>
-                <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold">Bimonetario $ USD / C$ NIO</span>
+                <span>@(verCostos ? "Catálogo de Productos & Órdenes de Compra" : "Catálogo Técnico & Requisiciones de Farmacia")</span>
+                <span class="text-xs px-2.5 py-0.5 rounded-full @(verCostos ? "bg-emerald-100 text-emerald-800 border border-emerald-300" : "bg-teal-100 text-teal-800 border border-teal-300") font-bold">
+                    @(verCostos ? "Bimonetario $ USD / C$ NIO" : "Vista Clínica (Sin Costos)")
+                </span>
             </h1>
             <p class="text-xs text-on-surface-variant mt-1">
-                Gestión comercial de proveedores, lista de precios mayoristas con reglas de descuento por volumen (porcentaje o monto fijo) y emisión de órdenes vinculadas a inventario.
+                @(verCostos
+                    ? "Gestión comercial de proveedores, lista de precios mayoristas con reglas de descuento por volumen (porcentaje o monto fijo) y emisión de órdenes vinculadas a inventario."
+                    : "Consulta de proveedores homologados, catálogo técnico de insumos veterinarios y emisión o recepción física de requisiciones hacia Kardex.")
             </p>
         </div>
         <div class="flex flex-wrap items-center gap-2.5">
-            <button type="button" onclick="abrirModalNuevoProducto()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest text-xs font-bold transition-all border border-outline-variant shadow-xs">
-                <span class="material-symbols-outlined text-[16px]">add_box</span>
-                <span>+ Producto a Catálogo</span>
-            </button>
-            <button type="button" onclick="abrirModalNuevoProveedor()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest text-xs font-bold transition-all border border-outline-variant shadow-xs">
-                <span class="material-symbols-outlined text-[16px]">business</span>
-                <span>+ Nuevo Proveedor</span>
-            </button>
+            @if (verCostos)
+            {
+                <button type="button" onclick="abrirModalNuevoProducto()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest text-xs font-bold transition-all border border-outline-variant shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">add_box</span>
+                    <span>+ Producto a Catálogo</span>
+                </button>
+                <button type="button" onclick="abrirModalNuevoProveedor()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest text-xs font-bold transition-all border border-outline-variant shadow-xs">
+                    <span class="material-symbols-outlined text-[16px]">business</span>
+                    <span>+ Nuevo Proveedor</span>
+                </button>
+            }
             <a href="#seccion-nueva-orden" onclick="cambiarTab('nueva-orden')" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 text-xs font-bold transition-all shadow-sm">
                 <span class="material-symbols-outlined text-[16px]">receipt_long</span>
-                <span>Crear Orden de Compra</span>
+                <span>@(verCostos ? "Crear Orden de Compra" : "Nueva Requisición")</span>
             </a>
         </div>
     </div>
@@ -54,25 +63,49 @@
 
     <!-- KPI Summary Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- KPI 1: Inversión en Compras -->
-        <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
-            <div class="flex items-center justify-between text-on-surface-variant text-xs">
-                <span class="font-bold uppercase tracking-wider text-outline">Total en Órdenes</span>
-                <span class="material-symbols-outlined text-emerald-600">payments</span>
-            </div>
-            <div class="mt-2">
-                <div class="text-2xl font-bold font-headline text-emerald-800">
-                    $@Model.Data.TotalCompradoUsd.ToString("N2") <span class="text-xs font-normal text-on-surface-variant">USD</span>
+        @if (verCostos)
+        {
+            <!-- KPI 1: Inversión en Compras -->
+            <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-on-surface-variant text-xs">
+                    <span class="font-bold uppercase tracking-wider text-outline">Total en Órdenes</span>
+                    <span class="material-symbols-outlined text-emerald-600">payments</span>
                 </div>
-                <div class="text-xs font-semibold text-emerald-700 mt-0.5">
-                    C$ @Model.Data.TotalCompradoNio.ToString("N2") <span class="text-[10px] text-outline font-normal">(TC: @Model.Data.TasaCambioOficial)</span>
+                <div class="mt-2">
+                    <div class="text-2xl font-bold font-headline text-emerald-800">
+                        $@Model.Data.TotalCompradoUsd.ToString("N2") <span class="text-xs font-normal text-on-surface-variant">USD</span>
+                    </div>
+                    <div class="text-xs font-semibold text-emerald-700 mt-0.5">
+                        C$ @Model.Data.TotalCompradoNio.ToString("N2") <span class="text-[10px] text-outline font-normal">(TC: @Model.Data.TasaCambioOficial)</span>
+                    </div>
+                </div>
+                <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
+                    <span>Órdenes emitidas activas</span>
+                    <span class="font-bold text-on-surface">@Model.Data.OrdenesCompra.Count</span>
                 </div>
             </div>
-            <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
-                <span>Órdenes emitidas activas</span>
-                <span class="font-bold text-on-surface">@Model.Data.OrdenesCompra.Count</span>
+        }
+        else
+        {
+            <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-on-surface-variant text-xs">
+                    <span class="font-bold uppercase tracking-wider text-outline">Requisiciones Registradas</span>
+                    <span class="material-symbols-outlined text-teal-700">receipt_long</span>
+                </div>
+                <div class="mt-2">
+                    <div class="text-2xl font-bold font-headline text-teal-800">
+                        @Model.Data.OrdenesCompra.Count <span class="text-xs font-normal text-on-surface-variant">órdenes</span>
+                    </div>
+                    <div class="text-xs font-medium text-on-surface-variant mt-0.5">
+                        Solicitudes de insumos y biológicos
+                    </div>
+                </div>
+                <div class="mt-3 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-[11px] text-on-surface-variant">
+                    <span>En tránsito a Kardex</span>
+                    <span class="font-bold text-on-surface">@Model.Data.TotalOrdenesPendientes</span>
+                </div>
             </div>
-        </div>
+        }
 
         <!-- KPI 2: Proveedores Homologados -->
         <div class="p-4 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-col justify-between">
@@ -160,23 +193,26 @@
 
     <!-- TAB 1: CATÁLOGO DE PRODUCTOS & PRECIOS CON REGLAS DE DESCUENTO -->
     <div id="tab-panel-catalogo" class="flex flex-col gap-4">
-        <!-- Information Box on Discount Rules -->
-        <div class="p-3.5 rounded-xl border border-primary/20 bg-primary-fixed/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-            <div class="flex items-start gap-2.5">
-                <span class="material-symbols-outlined text-primary text-[20px] shrink-0 mt-0.5">percent</span>
-                <div>
-                    <span class="font-bold text-on-surface">Política de Descuentos por Volumen Configurable:</span>
-                    <p class="text-on-surface-variant mt-0.5">
-                        Cada producto puede tener un umbral de activación (ej. a partir de 10 sacos o 20 quintales). El descuento puede calcularse como <strong>porcentaje (%)</strong> sobre el precio o como <strong>rebaja monetaria fija ($ USD / C$ NIO)</strong> por unidad.
-                    </p>
+        @if (verCostos)
+        {
+            <!-- Information Box on Discount Rules -->
+            <div class="p-3.5 rounded-xl border border-primary/20 bg-primary-fixed/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                <div class="flex items-start gap-2.5">
+                    <span class="material-symbols-outlined text-primary text-[20px] shrink-0 mt-0.5">percent</span>
+                    <div>
+                        <span class="font-bold text-on-surface">Política de Descuentos por Volumen Configurable:</span>
+                        <p class="text-on-surface-variant mt-0.5">
+                            Cada producto puede tener un umbral de activación (ej. a partir de 10 sacos o 20 quintales). El descuento puede calcularse como <strong>porcentaje (%)</strong> sobre el precio o como <strong>rebaja monetaria fija ($ USD / C$ NIO)</strong> por unidad.
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <span class="px-2.5 py-1 rounded-md bg-white border border-outline-variant font-bold text-primary text-[11px]">
+                        Tasa Oficial: C$ 36.80 = $1.00 USD
+                    </span>
                 </div>
             </div>
-            <div class="flex items-center gap-2 shrink-0">
-                <span class="px-2.5 py-1 rounded-md bg-white border border-outline-variant font-bold text-primary text-[11px]">
-                    Tasa Oficial: C$ 36.80 = $1.00 USD
-                </span>
-            </div>
-        </div>
+        }
 
         <!-- Filter bar -->
         <div class="p-3 rounded-xl border border-outline-variant bg-surface-container-lowest shadow-xs flex flex-wrap items-center justify-between gap-3">
@@ -210,18 +246,21 @@
                                 </span>
                                 <div class="text-[11px] font-mono text-outline mt-1 font-semibold">@prod.CodigoProducto</div>
                             </div>
-                            @if (prod.AplicaDescuento)
+                            @if (verCostos)
                             {
-                                <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full @(prod.TipoDescuento == "porcentaje" ? "bg-purple-100 text-purple-800 border border-purple-300" : "bg-emerald-100 text-emerald-800 border border-emerald-300")">
-                                    <span class="material-symbols-outlined text-[11px]">local_offer</span>
-                                    @(prod.TipoDescuento == "porcentaje" ? $"{prod.DescuentoPorcentaje:0.#}% Dto." : $"-$ {prod.DescuentoMonetarioUsd:N2}")
-                                </span>
-                            }
-                            else
-                            {
-                                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-surface-container text-outline">
-                                    Precio Neto
-                                </span>
+                                @if (prod.AplicaDescuento)
+                                {
+                                    <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full @(prod.TipoDescuento == "porcentaje" ? "bg-purple-100 text-purple-800 border border-purple-300" : "bg-emerald-100 text-emerald-800 border border-emerald-300")">
+                                        <span class="material-symbols-outlined text-[11px]">local_offer</span>
+                                        @(prod.TipoDescuento == "porcentaje" ? $"{prod.DescuentoPorcentaje:0.#}% Dto." : $"-$ {prod.DescuentoMonetarioUsd:N2}")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-surface-container text-outline">
+                                        Precio Neto
+                                    </span>
+                                }
                             }
                         </div>
 
@@ -229,42 +268,45 @@
                         <h2 class="text-sm font-bold text-on-surface mt-2.5 leading-snug">@prod.NombreProducto</h2>
                         <div class="text-xs text-on-surface-variant mt-0.5">Presentación: <strong>@prod.UnidadMedida</strong></div>
 
-                        <!-- Pricing Box -->
-                        <div class="mt-3 p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/60 flex items-center justify-between">
-                            <div>
-                                <div class="text-[10px] text-outline font-semibold uppercase">Precio Regular</div>
-                                <div class="text-base font-bold text-primary font-headline">$@prod.PrecioUnitarioUsd.ToString("N2") <span class="text-[10px] font-normal text-on-surface-variant">USD / @prod.UnidadMedida</span></div>
-                            </div>
-                            <div class="text-right">
-                                <div class="text-[10px] text-outline font-semibold uppercase">En Córdobas</div>
-                                <div class="text-xs font-bold text-on-surface">C$ @prod.PrecioUnitarioNio.ToString("N2")</div>
-                            </div>
-                        </div>
-
-                        <!-- Discount Rule Detail -->
-                        @if (prod.AplicaDescuento)
+                        @if (verCostos)
                         {
-                            <div class="mt-2.5 p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-900 text-xs flex flex-col gap-1">
-                                <div class="flex items-center gap-1 font-bold text-[11px]">
-                                    <span class="material-symbols-outlined text-[14px] text-emerald-700">verified</span>
-                                    <span>Regla de Descuento por Volumen:</span>
+                            <!-- Pricing Box -->
+                            <div class="mt-3 p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/60 flex items-center justify-between">
+                                <div>
+                                    <div class="text-[10px] text-outline font-semibold uppercase">Precio Regular</div>
+                                    <div class="text-base font-bold text-primary font-headline">$@prod.PrecioUnitarioUsd.ToString("N2") <span class="text-[10px] font-normal text-on-surface-variant">USD / @prod.UnidadMedida</span></div>
                                 </div>
-                                <div class="text-[11px] leading-tight">
-                                    A partir de <strong>@prod.UnidadesMinimasDescuento @prod.UnidadMedida</strong>:
-                                    @if (prod.TipoDescuento == "porcentaje")
-                                    {
-                                        <span>aplica <strong>@prod.DescuentoPorcentaje:0.#% de descuento</strong> (Ahorro: $@(Math.Round(prod.PrecioUnitarioUsd * (prod.DescuentoPorcentaje / 100m), 2).ToString("N2")) USD / ud).</span>
-                                    }
-                                    else
-                                    {
-                                        <span>descuento monetario directo de <strong>$@prod.DescuentoMonetarioUsd.ToString("N2") USD</strong> (C$ @prod.DescuentoMonetarioNio.ToString("N2")) por unidad.</span>
-                                    }
+                                <div class="text-right">
+                                    <div class="text-[10px] text-outline font-semibold uppercase">En Córdobas</div>
+                                    <div class="text-xs font-bold text-on-surface">C$ @prod.PrecioUnitarioNio.ToString("N2")</div>
                                 </div>
-                                @if (!string.IsNullOrWhiteSpace(prod.NotasPromocion))
-                                {
-                                    <div class="text-[10px] text-emerald-700 italic">“@prod.NotasPromocion”</div>
-                                }
                             </div>
+
+                            <!-- Discount Rule Detail -->
+                            @if (prod.AplicaDescuento)
+                            {
+                                <div class="mt-2.5 p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-900 text-xs flex flex-col gap-1">
+                                    <div class="flex items-center gap-1 font-bold text-[11px]">
+                                        <span class="material-symbols-outlined text-[14px] text-emerald-700">verified</span>
+                                        <span>Regla de Descuento por Volumen:</span>
+                                    </div>
+                                    <div class="text-[11px] leading-tight">
+                                        A partir de <strong>@prod.UnidadesMinimasDescuento @prod.UnidadMedida</strong>:
+                                        @if (prod.TipoDescuento == "porcentaje")
+                                        {
+                                            <span>aplica <strong>@prod.DescuentoPorcentaje:0.#% de descuento</strong> (Ahorro: $@(Math.Round(prod.PrecioUnitarioUsd * (prod.DescuentoPorcentaje / 100m), 2).ToString("N2")) USD / ud).</span>
+                                        }
+                                        else
+                                        {
+                                            <span>descuento monetario directo de <strong>$@prod.DescuentoMonetarioUsd.ToString("N2") USD</strong> (C$ @prod.DescuentoMonetarioNio.ToString("N2")) por unidad.</span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(prod.NotasPromocion))
+                                    {
+                                        <div class="text-[10px] text-emerald-700 italic">“@prod.NotasPromocion”</div>
+                                    }
+                                </div>
+                            }
                         }
                     </div>
 
@@ -306,13 +348,20 @@
                         }
                     </select>
                 </div>
-                <div>
-                    <label for="orden-moneda-select" class="block text-xs font-bold text-on-surface mb-1">Moneda Principal</label>
-                    <select id="orden-moneda-select" class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary">
-                        <option value="USD" selected>Dólares Americanos ($ USD)</option>
-                        <option value="NIO">Córdobas Nicaragüenses (C$ NIO)</option>
-                    </select>
-                </div>
+                @if (verCostos)
+                {
+                    <div>
+                        <label for="orden-moneda-select" class="block text-xs font-bold text-on-surface mb-1">Moneda Principal</label>
+                        <select id="orden-moneda-select" class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary">
+                            <option value="USD" selected>Dólares Americanos ($ USD)</option>
+                            <option value="NIO">Córdobas Nicaragüenses (C$ NIO)</option>
+                        </select>
+                    </div>
+                }
+                else
+                {
+                    <input type="hidden" id="orden-moneda-select" value="USD" />
+                }
                 <div>
                     <label for="orden-fecha-entrega" class="block text-xs font-bold text-on-surface mb-1">Fecha Entrega Esperada</label>
                     <input id="orden-fecha-entrega" type="date" value="@DateTime.Today.AddDays(3).ToString("yyyy-MM-dd")" class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-outline-variant bg-white text-on-surface focus:ring-2 focus:ring-primary" />
@@ -331,18 +380,24 @@
                         <thead>
                             <tr class="bg-surface-container-high text-on-surface font-bold border-b border-outline-variant">
                                 <th class="p-3">Producto / Presentación</th>
-                                <th class="p-3 text-center">Precio Lista ($)</th>
-                                <th class="p-3 text-center">Regla de Descuento</th>
+                                @if (verCostos)
+                                {
+                                    <th class="p-3 text-center">Precio Lista ($)</th>
+                                    <th class="p-3 text-center">Regla de Descuento</th>
+                                }
                                 <th class="p-3 text-center w-28">Cantidad</th>
-                                <th class="p-3 text-right">Subtotal ($)</th>
-                                <th class="p-3 text-right">Descuento ($)</th>
-                                <th class="p-3 text-right">Total Neto ($)</th>
+                                @if (verCostos)
+                                {
+                                    <th class="p-3 text-right">Subtotal ($)</th>
+                                    <th class="p-3 text-right">Descuento ($)</th>
+                                    <th class="p-3 text-right">Total Neto ($)</th>
+                                }
                                 <th class="p-3 text-center w-12">Acción</th>
                             </tr>
                         </thead>
                         <tbody id="orden-lineas-tbody">
                             <tr id="orden-empty-row">
-                                <td colspan="8" class="p-8 text-center text-on-surface-variant">
+                                <td colspan="@(verCostos ? 8 : 3)" class="p-8 text-center text-on-surface-variant">
                                     <span class="material-symbols-outlined text-[36px] text-outline block mb-1">add_shopping_cart</span>
                                     <span>No hay productos agregados a la orden. Selecciona un proveedor y pulsa "Agregar Producto".</span>
                                 </td>
@@ -371,24 +426,33 @@
 
                 <!-- Financial calculation panel -->
                 <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant flex flex-col gap-2">
-                    <div class="flex items-center justify-between text-xs text-on-surface-variant">
-                        <span>Subtotal Bruto:</span>
-                        <span id="resumen-subtotal-usd" class="font-bold text-on-surface">$ 0.00 USD</span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs text-emerald-700">
-                        <span class="flex items-center gap-1">
-                            <span class="material-symbols-outlined text-[14px]">local_offer</span>
-                            Descuento por Volumen:
-                        </span>
-                        <span id="resumen-descuento-usd" class="font-bold">-$ 0.00 USD</span>
-                    </div>
-                    <div class="pt-2 border-t border-outline-variant/80 flex items-center justify-between">
-                        <span class="text-xs font-bold text-on-surface">TOTAL ORDEN:</span>
-                        <div class="text-right">
-                            <div id="resumen-total-usd" class="text-lg font-headline font-bold text-primary">$ 0.00 USD</div>
-                            <div id="resumen-total-nio" class="text-xs font-bold text-on-surface-variant">C$ 0.00 NIO</div>
+                    @if (verCostos)
+                    {
+                        <div class="flex items-center justify-between text-xs text-on-surface-variant">
+                            <span>Subtotal Bruto:</span>
+                            <span id="resumen-subtotal-usd" class="font-bold text-on-surface">$ 0.00 USD</span>
                         </div>
-                    </div>
+                        <div class="flex items-center justify-between text-xs text-emerald-700">
+                            <span class="flex items-center gap-1">
+                                <span class="material-symbols-outlined text-[14px]">local_offer</span>
+                                Descuento por Volumen:
+                            </span>
+                            <span id="resumen-descuento-usd" class="font-bold">-$ 0.00 USD</span>
+                        </div>
+                        <div class="pt-2 border-t border-outline-variant/80 flex items-center justify-between">
+                            <span class="text-xs font-bold text-on-surface">TOTAL ORDEN:</span>
+                            <div class="text-right">
+                                <div id="resumen-total-usd" class="text-lg font-headline font-bold text-primary">$ 0.00 USD</div>
+                                <div id="resumen-total-nio" class="text-xs font-bold text-on-surface-variant">C$ 0.00 NIO</div>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-xs text-on-surface-variant">
+                            Las cantidades solicitadas serán cotizadas y autorizadas por Administración al emitir la compra.
+                        </div>
+                    }
 
                     <div class="mt-2">
                         <button type="button" id="btn-emitir-orden-submit" onclick="enviarOrdenCompra()" class="w-full py-2.5 px-4 rounded-xl bg-primary text-on-primary hover:bg-primary/90 font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all">
@@ -421,10 +485,13 @@
                             <th class="p-3">Proveedor</th>
                             <th class="p-3">Fecha Emisión</th>
                             <th class="p-3">Estado</th>
-                            <th class="p-3 text-right">Subtotal</th>
-                            <th class="p-3 text-right">Descuento</th>
-                            <th class="p-3 text-right">Total ($ USD)</th>
-                            <th class="p-3 text-right">Total (C$ NIO)</th>
+                            @if (verCostos)
+                            {
+                                <th class="p-3 text-right">Subtotal</th>
+                                <th class="p-3 text-right">Descuento</th>
+                                <th class="p-3 text-right">Total ($ USD)</th>
+                                <th class="p-3 text-right">Total (C$ NIO)</th>
+                            }
                             <th class="p-3 text-center">Acciones</th>
                         </tr>
                     </thead>
@@ -467,12 +534,15 @@
                                         </div>
                                     }
                                 </td>
-                                <td class="p-3 text-right font-medium text-on-surface-variant">$@ord.SubtotalUsd.ToString("N2")</td>
-                                <td class="p-3 text-right font-bold text-emerald-700">
-                                    @(ord.DescuentoUsd > 0 ? $"-${ord.DescuentoUsd:N2}" : "$0.00")
-                                </td>
-                                <td class="p-3 text-right font-bold font-headline text-on-surface">$@ord.TotalUsd.ToString("N2")</td>
-                                <td class="p-3 text-right font-bold text-primary">C$ @ord.TotalNio.ToString("N2")</td>
+                                @if (verCostos)
+                                {
+                                    <td class="p-3 text-right font-medium text-on-surface-variant">$@ord.SubtotalUsd.ToString("N2")</td>
+                                    <td class="p-3 text-right font-bold text-emerald-700">
+                                        @(ord.DescuentoUsd > 0 ? $"-${ord.DescuentoUsd:N2}" : "$0.00")
+                                    </td>
+                                    <td class="p-3 text-right font-bold font-headline text-on-surface">$@ord.TotalUsd.ToString("N2")</td>
+                                    <td class="p-3 text-right font-bold text-primary">C$ @ord.TotalNio.ToString("N2")</td>
+                                }
                                 <td class="p-3 text-center">
                                     <div class="flex items-center justify-center gap-1.5">
                                         <button type="button" onclick="abrirModalImprimirOrden('@ord.Id')" class="px-2 py-1 rounded bg-surface-container hover:bg-surface-container-high text-primary font-bold text-[11px] border border-outline-variant flex items-center gap-1" title="Ver proforma, imprimir PDF o enviar por WhatsApp">
@@ -888,11 +958,14 @@
                             <th class="py-2">Descripción del Insumo</th>
                             <th class="py-2 text-center">Unidad</th>
                             <th class="py-2 text-right">Cantidad</th>
-                            <th class="py-2 text-right">Precio Unit. ($)</th>
-                            <th class="py-2 text-right">Dto. Volumen</th>
-                            <th class="py-2 text-right">Subtotal ($)</th>
-                            <th class="py-2 text-right">Total ($ USD)</th>
-                            <th class="py-2 text-right">Total (C$ NIO)</th>
+                            @if (verCostos)
+                            {
+                                <th class="py-2 text-right">Precio Unit. ($)</th>
+                                <th class="py-2 text-right">Dto. Volumen</th>
+                                <th class="py-2 text-right">Subtotal ($)</th>
+                                <th class="py-2 text-right">Total ($ USD)</th>
+                                <th class="py-2 text-right">Total (C$ NIO)</th>
+                            }
                         </tr>
                     </thead>
                     <tbody id="factura-items-tbody" class="divide-y divide-gray-200">
@@ -906,29 +979,35 @@
                 <div class="max-w-xs text-gray-600 text-[11px]">
                     <span class="font-bold text-gray-800 block mb-1">Observaciones / Instrucciones:</span>
                     <p id="factura-observaciones" class="italic text-gray-500">Ninguna especificada.</p>
-                    <div class="mt-3 text-[10px] text-gray-400">
-                        * Tasa oficial aplicada: C$ 36.80 NIO por 1 USD. Los descuentos se aplican según la escala acordada con el proveedor.
-                    </div>
+                    @if (verCostos)
+                    {
+                        <div class="mt-3 text-[10px] text-gray-400">
+                            * Tasa oficial aplicada: C$ 36.80 NIO por 1 USD. Los descuentos se aplican según la escala acordada con el proveedor.
+                        </div>
+                    }
                 </div>
 
-                <div class="w-64 flex flex-col gap-1.5 p-3 rounded-lg bg-gray-50 border border-gray-200 text-right">
-                    <div class="flex justify-between text-gray-600">
-                        <span>Subtotal Bruto:</span>
-                        <span id="factura-subtotal-usd" class="font-semibold">$0.00</span>
+                @if (verCostos)
+                {
+                    <div class="w-64 flex flex-col gap-1.5 p-3 rounded-lg bg-gray-50 border border-gray-200 text-right">
+                        <div class="flex justify-between text-gray-600">
+                            <span>Subtotal Bruto:</span>
+                            <span id="factura-subtotal-usd" class="font-semibold">$0.00</span>
+                        </div>
+                        <div class="flex justify-between text-emerald-700 font-semibold">
+                            <span>Descuento Volumen:</span>
+                            <span id="factura-descuento-usd">-$0.00</span>
+                        </div>
+                        <div class="pt-2 border-t border-gray-300 flex justify-between items-baseline">
+                            <span class="font-bold text-gray-900 text-xs">TOTAL NETO (USD):</span>
+                            <span id="factura-total-usd" class="text-base font-bold text-emerald-800">$0.00 USD</span>
+                        </div>
+                        <div class="flex justify-between items-baseline text-gray-700">
+                            <span class="font-bold text-xs">TOTAL (C$ NIO):</span>
+                            <span id="factura-total-nio" class="font-bold text-sm text-gray-900">C$ 0.00 NIO</span>
+                        </div>
                     </div>
-                    <div class="flex justify-between text-emerald-700 font-semibold">
-                        <span>Descuento Volumen:</span>
-                        <span id="factura-descuento-usd">-$0.00</span>
-                    </div>
-                    <div class="pt-2 border-t border-gray-300 flex justify-between items-baseline">
-                        <span class="font-bold text-gray-900 text-xs">TOTAL NETO (USD):</span>
-                        <span id="factura-total-usd" class="text-base font-bold text-emerald-800">$0.00 USD</span>
-                    </div>
-                    <div class="flex justify-between items-baseline text-gray-700">
-                        <span class="font-bold text-xs">TOTAL (C$ NIO):</span>
-                        <span id="factura-total-nio" class="font-bold text-sm text-gray-900">C$ 0.00 NIO</span>
-                    </div>
-                </div>
+                }
             </div>
 
             <!-- Firmas de Autorización -->
@@ -952,6 +1031,7 @@
 
 <!-- Scripts interactivos de Catálogo y Órdenes -->
 <script>
+    const VER_COSTOS_COMPRAS = @(verCostos ? "true" : "false");
     const CATALOGO_JSON = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Data.ProductosCatalogo));
     const ORDENES_JSON = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Data.OrdenesCompra));
     const PROVEEDORES_JSON = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Data.Proveedores));
@@ -1059,7 +1139,7 @@
         if (lineasOrden.length === 0) {
             tbody.innerHTML = `
                 <tr id="orden-empty-row">
-                    <td colspan="8" class="p-8 text-center text-on-surface-variant">
+                    <td colspan="${VER_COSTOS_COMPRAS ? 8 : 3}" class="p-8 text-center text-on-surface-variant">
                         <span class="material-symbols-outlined text-[36px] text-outline block mb-1">add_shopping_cart</span>
                         <span>No hay productos agregados a la orden. Selecciona un proveedor y pulsa "Agregar Producto".</span>
                     </td>
@@ -1098,14 +1178,7 @@
                 optionsHtml += `<option value="${p.Id}" ${sel}>${p.NombreProducto} (${p.UnidadMedida})</option>`;
             });
 
-            html += `
-                <tr class="border-b border-outline-variant/60 hover:bg-surface-container-low/40 transition-colors">
-                    <td class="p-3">
-                        <select onchange="cambiarProductoLinea(${index}, this.value)" class="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-outline-variant bg-white text-on-surface">
-                            ${optionsHtml}
-                        </select>
-                        <div class="text-[11px] text-outline mt-0.5">${prod.UnidadMedida}</div>
-                    </td>
+            const costoCols = VER_COSTOS_COMPRAS ? `
                     <td class="p-3 text-center font-bold text-on-surface font-headline">
                         $${prod.PrecioUnitarioUsd.toFixed(2)}
                     </td>
@@ -1116,10 +1189,8 @@
                                </span>`
                             : `<span class="text-[10px] text-outline">Sin dto.</span>`
                         }
-                    </td>
-                    <td class="p-3 text-center">
-                        <input type="number" min="1" value="${cant}" oninput="cambiarCantidadLinea(${index}, this.value)" class="w-20 text-center font-bold text-xs px-2 py-1 rounded border border-outline-variant bg-white text-on-surface focus:ring-1 focus:ring-primary" />
-                    </td>
+                    </td>` : '';
+            const costoTotalsCols = VER_COSTOS_COMPRAS ? `
                     <td class="p-3 text-right font-medium text-on-surface-variant">
                         $${subtotal.toFixed(2)}
                     </td>
@@ -1128,7 +1199,21 @@
                     </td>
                     <td class="p-3 text-right font-bold text-primary font-headline">
                         $${totalLinea.toFixed(2)}
+                    </td>` : '';
+
+            html += `
+                <tr class="border-b border-outline-variant/60 hover:bg-surface-container-low/40 transition-colors">
+                    <td class="p-3">
+                        <select onchange="cambiarProductoLinea(${index}, this.value)" class="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-outline-variant bg-white text-on-surface">
+                            ${optionsHtml}
+                        </select>
+                        <div class="text-[11px] text-outline mt-0.5">${prod.UnidadMedida}</div>
                     </td>
+                    ${costoCols}
+                    <td class="p-3 text-center">
+                        <input type="number" min="1" value="${cant}" oninput="cambiarCantidadLinea(${index}, this.value)" class="w-20 text-center font-bold text-xs px-2 py-1 rounded border border-outline-variant bg-white text-on-surface focus:ring-1 focus:ring-primary" />
+                    </td>
+                    ${costoTotalsCols}
                     <td class="p-3 text-center">
                         <button type="button" onclick="eliminarLineaOrden(${index})" class="p-1 rounded text-red-600 hover:bg-red-50">
                             <span class="material-symbols-outlined text-[16px]">delete</span>
@@ -1157,6 +1242,7 @@
     }
 
     function actualizarTotalesOrden() {
+        if (!VER_COSTOS_COMPRAS) return;
         let subtotalUsd = 0;
         let descuentoUsd = 0;
         let totalUsd = 0;
@@ -1330,31 +1416,35 @@
             ord.Detalles.forEach(d => {
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-gray-50';
-                tr.innerHTML = `
-                    <td class="py-2 font-medium">${d.Descripcion}</td>
-                    <td class="py-2 text-center text-gray-500">${d.UnidadMedida}</td>
-                    <td class="py-2 text-right font-bold">${Number(d.Cantidad).toFixed(0)}</td>
+                const colsCostos = VER_COSTOS_COMPRAS ? `
                     <td class="py-2 text-right font-medium">$${Number(d.PrecioUnitarioUsd).toFixed(2)}</td>
                     <td class="py-2 text-right ${d.AplicoDescuento ? 'text-emerald-700 font-bold' : 'text-gray-400'}">
                         ${d.AplicoDescuento ? '-$' + Number(d.MontoDescuentoLineaUsd).toFixed(2) : '$0.00'}
                     </td>
                     <td class="py-2 text-right text-gray-600">$${Number(d.SubtotalLineaUsd).toFixed(2)}</td>
                     <td class="py-2 text-right font-bold text-gray-900">$${Number(d.TotalLineaUsd).toFixed(2)}</td>
-                    <td class="py-2 text-right font-bold text-emerald-800">C$ ${Number(d.TotalLineaNio).toFixed(2)}</td>
+                    <td class="py-2 text-right font-bold text-emerald-800">C$ ${Number(d.TotalLineaNio).toFixed(2)}</td>` : '';
+                tr.innerHTML = `
+                    <td class="py-2 font-medium">${d.Descripcion}</td>
+                    <td class="py-2 text-center text-gray-500">${d.UnidadMedida}</td>
+                    <td class="py-2 text-right font-bold">${Number(d.Cantidad).toFixed(0)}</td>
+                    ${colsCostos}
                 `;
                 tbody.appendChild(tr);
             });
         } else {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="py-4 text-center text-gray-500 italic">No hay ítems detallados para esta orden.</td>
+                    <td colspan="${VER_COSTOS_COMPRAS ? 8 : 3}" class="py-4 text-center text-gray-500 italic">No hay ítems detallados para esta orden.</td>
                 </tr>`;
         }
 
-        document.getElementById('factura-subtotal-usd').textContent = '$ ' + Number(ord.SubtotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        document.getElementById('factura-descuento-usd').textContent = '-$ ' + Number(ord.DescuentoUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        document.getElementById('factura-total-usd').textContent = '$ ' + Number(ord.TotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
-        document.getElementById('factura-total-nio').textContent = 'C$ ' + Number(ord.TotalNio).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' NIO';
+        if (VER_COSTOS_COMPRAS) {
+            document.getElementById('factura-subtotal-usd').textContent = '$ ' + Number(ord.SubtotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('factura-descuento-usd').textContent = '-$ ' + Number(ord.DescuentoUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('factura-total-usd').textContent = '$ ' + Number(ord.TotalUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD';
+            document.getElementById('factura-total-nio').textContent = 'C$ ' + Number(ord.TotalNio).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' NIO';
+        }
 
         document.getElementById('modal-imprimir-orden').style.display = 'flex';
     }
@@ -1374,18 +1464,21 @@
         const prov = PROVEEDORES_JSON.find(p => p.Id === ord.ProveedorId);
         const tel = prov && prov.Telefono ? prov.Telefono.replace(/[^0-9]/g, '') : '';
         
-        let texto = `*ORDEN DE COMPRA OFICIAL - AGROPIG SUITE*%0A`;
+        let texto = `*${VER_COSTOS_COMPRAS ? 'ORDEN DE COMPRA OFICIAL' : 'REQUISICIÓN TÉCNICA DE INSUMOS'} - AGROPIG SUITE*%0A`;
         texto += `*N° Orden:* ${ord.NumeroOrden}%0A`;
         texto += `*Proveedor:* ${ord.ProveedorNombre}%0A`;
         texto += `*Fecha:* ${new Date(ord.FechaEmision).toLocaleDateString('es-NI')}%0A`;
-        texto += `*Total:* $${Number(ord.TotalUsd).toFixed(2)} USD (C$ ${Number(ord.TotalNio).toFixed(2)} NIO)%0A`;
-        if (ord.DescuentoUsd > 0) {
-            texto += `*Descuento por volumen aplicado:* -$${Number(ord.DescuentoUsd).toFixed(2)} USD%0A`;
+        if (VER_COSTOS_COMPRAS) {
+            texto += `*Total:* $${Number(ord.TotalUsd).toFixed(2)} USD (C$ ${Number(ord.TotalNio).toFixed(2)} NIO)%0A`;
+            if (ord.DescuentoUsd > 0) {
+                texto += `*Descuento por volumen aplicado:* -$${Number(ord.DescuentoUsd).toFixed(2)} USD%0A`;
+            }
         }
         texto += `%0A*Detalle de Insumos:*%0A`;
         if (ord.Detalles && ord.Detalles.length > 0) {
             ord.Detalles.forEach(d => {
-                texto += `• ${d.Cantidad} ${d.UnidadMedida} - ${d.Descripcion} ($${Number(d.TotalLineaUsd).toFixed(2)} USD)%0A`;
+                const costoTxt = VER_COSTOS_COMPRAS ? ` ($${Number(d.TotalLineaUsd).toFixed(2)} USD)` : '';
+                texto += `• ${d.Cantidad} ${d.UnidadMedida} - ${d.Descripcion}${costoTxt}%0A`;
             });
         }
         texto += `%0A*Observaciones:* ${ord.Observaciones || 'Entrega estándar en granja.'}%0A`;

@@ -17,6 +17,7 @@ public class ReproduccionModel : PageModel
     }
 
     public ReproduccionPageViewModel Data { get; set; } = new();
+    public CatalogosFormularioWebViewModel Catalogos { get; set; } = new();
 
     [TempData]
     public string? MensajeExito { get; set; }
@@ -27,6 +28,7 @@ public class ReproduccionModel : PageModel
     public async Task OnGetAsync()
     {
         Data = await _dataService.GetReproduccionDataAsync();
+        Catalogos = await _dataService.GetCatalogosFormularioWebAsync();
     }
 
     // Inseminación Artificial (IA) / Monta

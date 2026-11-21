@@ -21,11 +21,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.porciapp.data.local.entities.CatClinicoEntity
+import com.example.porciapp.data.local.entities.CatGalponEntity
+import com.example.porciapp.data.local.entities.CatInsumoEntity
+import com.example.porciapp.data.local.entities.CatJaulaEntity
+import com.example.porciapp.data.local.entities.CerdoEntity
 import com.example.porciapp.data.model.UserProfile
 import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.data.repository.CatalogStore
 import com.example.porciapp.ui.components.*
 import com.example.porciapp.ui.theme.*
@@ -38,6 +45,7 @@ import java.util.Locale
 
 // Catálogo de medicamentos con su capacidad nominal de frasco y costo por ml
 private data class MedicamentoStockItem(
+    val sku: String,
     val nombre: String,
     val especificacion: String,
     val volumenFrascoMl: Double,
@@ -46,55 +54,186 @@ private data class MedicamentoStockItem(
     val diasRetiro: Int
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TreatmentScreen(
     onBackClick: () -> Unit,
     activeProfile: UserProfile = UserProfile.defaultFor(UserRole.VETERINARIO),
+    insumosCatalog: List<CatInsumoEntity> = emptyList(),
+    clinicosCatalog: List<CatClinicoEntity> = emptyList(),
+    galponesCatalog: List<CatGalponEntity> = emptyList(),
+    jaulasCatalog: List<CatJaulaEntity> = emptyList(),
+    cerdosFromDb: List<CerdoEntity> = emptyList(),
+    uiPrefs: WorkspaceUiPreferences = WorkspaceUiPreferences.defaultFor(activeProfile.rol),
     onSaveRecord: (com.example.porciapp.data.model.MedicalTreatmentRecord) -> Unit = {}
 ) {
     val context = LocalContext.current
     val catalogState by CatalogStore.get(context).catalog.collectAsState()
-    var crotal by remember(catalogState.cerdas, catalogState.lotes) {
-        mutableStateOf(
-            catalogState.cerdas.firstOrNull()?.caravana
-                ?: catalogState.lotes.firstOrNull()?.codigo
-                ?: ""
-        )
-    }
-    var galponJaula by remember(catalogState.cerdas, catalogState.lotes) {
-        mutableStateOf(
-            catalogState.cerdas.firstOrNull()?.let { "${it.galpon} / ${it.jaula}".trim(' ', '/') }
-                ?: catalogState.lotes.firstOrNull()?.galpon
-                ?: ""
-        )
+
+    val patientItems = remember(catalogState.cerdas, cerdosFromDb, catalogState.lotes) {
+        val seen = mutableSetOf<String>()
+        val cerdas = catalogState.cerdas.map { c ->
+            seen.add(c.caravana.uppercase())
+            CatalogChoiceItem(
+                id = c.caravana,
+                title = "Cerda ${c.caravana}",
+                subtitle = listOf(c.estado.replace('_', ' '), c.galpon, c.jaula).filter { it.isNotBlank() }.joinToString(" • "),
+                badge = "CERDA",
+                category = "Cerdas"
+            )
+        }
+        val indiv = cerdosFromDb.filter { seen.add(it.codigoCrotal.uppercase()) }.map { p ->
+            CatalogChoiceItem(
+                id = p.codigoCrotal,
+                title = "Cerdo ${p.codigoCrotal}",
+                subtitle = listOf(p.raza, p.sexo, p.jaula).filter { it.isNotBlank() }.joinToString(" • "),
+                badge = p.sexo.ifBlank { "CERDO" },
+                category = "Cerdos Individuales"
+            )
+        }
+        val lotes = catalogState.lotes.map { l ->
+            CatalogChoiceItem(
+                id = l.codigo,
+                title = "Lote ${l.codigo}",
+                subtitle = "${l.galpon.ifBlank { l.etapa }} • ${l.animales} animales",
+                badge = l.etapa,
+                category = "Lotes"
+            )
+        }
+        cerdas + indiv + lotes
     }
 
-    // Vademécum sincronizado con el catálogo del servidor + fármacos base
-    val vademecum = remember(catalogState.medicamentos) {
-        val base = listOf(
-            MedicamentoStockItem("Hierro Dextrano 200mg/ml", "Solución Inyectable Antianémica", 100.0, 5, 0.08, 0),
-            MedicamentoStockItem("Amoxicilina Trihidrato L.A.", "Antibiótico Betalactámico Larga Acción", 250.0, 3, 0.09, 14),
-            MedicamentoStockItem("Tilmicosina 300mg/ml", "Macrólido Respiratorio Porcino", 100.0, 2, 0.16, 21),
-            MedicamentoStockItem("Oxitocina Sintética 10 UI/ml", "Hormona Inductora y Contráctil", 50.0, 4, 0.05, 0),
-            MedicamentoStockItem("Complejo B + Aminoácidos", "Estimulante Metabólico Post-Parto", 100.0, 6, 0.06, 0)
-        )
-        val fromCatalog = catalogState.medicamentos
-            .filter { cat -> base.none { it.nombre.equals(cat.nombre, ignoreCase = true) } }
-            .map { cat ->
+    val ubicacionItems = remember(jaulasCatalog, galponesCatalog, catalogState.jaulas, catalogState.galpones) {
+        val jaulasRaw = if (jaulasCatalog.isNotEmpty()) {
+            jaulasCatalog.map { j ->
+                val txt = listOf(j.galponNombre, j.nombre).filter { it.isNotBlank() }.joinToString(" / ")
+                CatalogChoiceItem(
+                    id = txt,
+                    title = txt,
+                    subtitle = "${j.etapaZootecnica} • Ocup. ${j.ocupacionActual}/${j.capacidadMaxima}",
+                    badge = j.codigo,
+                    category = "Jaulas / Corrales"
+                )
+            }
+        } else {
+            catalogState.jaulas.map { j ->
+                val txt = listOf(j.galponNombre, j.nombre).filter { it.isNotBlank() }.joinToString(" / ")
+                CatalogChoiceItem(
+                    id = txt,
+                    title = txt,
+                    subtitle = "${j.etapaZootecnica} • Ocup. ${j.ocupacionActual}/${j.capacidadMaxima}",
+                    badge = j.codigo,
+                    category = "Jaulas / Corrales"
+                )
+            }
+        }
+        val galpRaw = if (galponesCatalog.isNotEmpty()) {
+            galponesCatalog.map { g ->
+                CatalogChoiceItem(
+                    id = g.nombre,
+                    title = g.nombre,
+                    subtitle = "${g.tipoSistema} • Cap. ${g.capacidad}",
+                    badge = g.codigo,
+                    category = "Galpones"
+                )
+            }
+        } else {
+            catalogState.galpones.map { g ->
+                CatalogChoiceItem(
+                    id = g.nombre,
+                    title = g.nombre,
+                    subtitle = "${g.tipoSistema} • Cap. ${g.capacidad}",
+                    badge = g.codigo,
+                    category = "Galpones"
+                )
+            }
+        }
+        jaulasRaw + galpRaw
+    }
+
+    var usarCrotalManual by remember { mutableStateOf(false) }
+    var crotal by remember(patientItems) {
+        mutableStateOf(patientItems.firstOrNull()?.id ?: "")
+    }
+    var galponJaula by remember(catalogState.cerdas, catalogState.lotes, uiPrefs.galponPredeterminado) {
+        val firstLoc = catalogState.cerdas.firstOrNull()?.let { "${it.galpon} / ${it.jaula}".trim(' ', '/') }
+            ?: catalogState.lotes.firstOrNull()?.galpon
+            ?: uiPrefs.galponPredeterminado
+        mutableStateOf(firstLoc)
+    }
+
+    // Vademécum 100% desde PostgreSQL / SQLite (categorías MED y BIO)
+    val vademecum = remember(insumosCatalog, catalogState.insumosDetalle, catalogState.medicamentos) {
+        val fromRoom = insumosCatalog.filter { it.categoriaCodigo in listOf("MED", "BIO") }
+        val list = when {
+            fromRoom.isNotEmpty() -> fromRoom.map { med ->
                 MedicamentoStockItem(
+                    sku = med.sku,
+                    nombre = med.nombre,
+                    especificacion = "${med.categoriaCodigo} • ${med.stockActual.toInt()} ${med.unidadMedida.ifBlank { "ml" }} disp.",
+                    volumenFrascoMl = if (med.nombre.contains("Amoxicilina", true)) 250.0 else if (med.nombre.contains("Oxitocina", true)) 50.0 else 100.0,
+                    stockFrascos = med.stockActual.toInt().coerceAtLeast(0),
+                    costoMlUsd = med.costoUnitarioUsd.takeIf { it > 0.0 } ?: 0.08,
+                    diasRetiro = when {
+                        med.nombre.contains("Tilmicosina", true) -> 21
+                        med.nombre.contains("Amoxicilina", true) -> 14
+                        med.nombre.contains("Ivermectina", true) -> 28
+                        med.nombre.contains("Enrofloxacina", true) -> 10
+                        med.nombre.contains("Hierro", true) || med.nombre.contains("Oxitocina", true) || med.nombre.contains("Complejo", true) -> 0
+                        else -> 7
+                    }
+                )
+            }
+            catalogState.insumosDetalle.any { it.categoriaCodigo in listOf("MED", "BIO") } -> {
+                catalogState.insumosDetalle.filter { it.categoriaCodigo in listOf("MED", "BIO") }.map { med ->
+                    MedicamentoStockItem(
+                        sku = med.sku,
+                        nombre = med.nombre,
+                        especificacion = "${med.categoriaCodigo} • ${med.stockActual.toInt()} ${med.unidadMedida.ifBlank { "ml" }} disp.",
+                        volumenFrascoMl = 100.0,
+                        stockFrascos = med.stockActual.toInt().coerceAtLeast(0),
+                        costoMlUsd = med.costoUnitarioUsd.takeIf { it > 0.0 } ?: 0.08,
+                        diasRetiro = 7
+                    )
+                }
+            }
+            else -> catalogState.medicamentos.map { cat ->
+                MedicamentoStockItem(
+                    sku = cat.nombre,
                     nombre = cat.nombre,
                     especificacion = "Catálogo Granja (${cat.unidad.ifBlank { "ml" }})",
                     volumenFrascoMl = 100.0,
-                    stockFrascos = cat.stock.toInt().coerceAtLeast(1),
+                    stockFrascos = cat.stock.toInt().coerceAtLeast(0),
                     costoMlUsd = 0.08,
                     diasRetiro = 7
                 )
             }
-        fromCatalog + base
+        }
+        list
+    }
+
+    val kitCatalog = remember(insumosCatalog, catalogState.insumosDetalle) {
+        val roomKit = insumosCatalog.filter { it.categoriaCodigo == "KIT" }
+        if (roomKit.isNotEmpty()) roomKit else catalogState.insumosDetalle.filter { it.categoriaCodigo == "KIT" }.map {
+            CatInsumoEntity(
+                sku = it.sku, id = it.id, nombre = it.nombre, categoriaCodigo = it.categoriaCodigo,
+                unidadMedida = it.unidadMedida, stockActual = it.stockActual, stockMinimo = it.stockMinimo,
+                costoUnitarioUsd = it.costoUnitarioUsd, siloCodigo = it.siloCodigo
+            )
+        }
     }
 
     var selectedMedIndex by remember { mutableIntStateOf(0) }
-    val medSeleccionado = vademecum[selectedMedIndex]
+    val safeMedIndex = if (vademecum.isNotEmpty()) selectedMedIndex.coerceIn(0, vademecum.lastIndex) else 0
+    val medSeleccionado = vademecum.getOrNull(safeMedIndex) ?: MedicamentoStockItem(
+        sku = "",
+        nombre = "Sin medicamentos sincronizados",
+        especificacion = "Sincroniza el catálogo en Inicio para cargar vademécum",
+        volumenFrascoMl = 100.0,
+        stockFrascos = 0,
+        costoMlUsd = 0.0,
+        diasRetiro = 0
+    )
 
     // Dosis aplicada y peso animal para cálculo zootécnico en tiempo real
     var dose by remember { mutableDoubleStateOf(5.0) }
@@ -103,14 +242,15 @@ fun TreatmentScreen(
     var showDosageCalculator by remember { mutableStateOf(false) }
 
     // Dosis recomendada calculada automáticamente según principio activo y peso
-    val dosisRecomendadaZootecnica = remember(selectedMedIndex, pesoAnimalKg) {
-        when (selectedMedIndex) {
-            0 -> 2.0 // Hierro neonatal (fijo)
-            1 -> Math.round((pesoAnimalKg / 10.0) * 10.0) / 10.0 // Amoxicilina 1 ml/10kg
-            2 -> Math.round((pesoAnimalKg / 15.0) * 10.0) / 10.0 // Tilmicosina 1 ml/15kg
-            3 -> 2.0 // Oxitocina neonatal
-            4 -> Math.round((pesoAnimalKg / 20.0) * 10.0) / 10.0 // Complejo B 1 ml/20kg
-            else -> 3.0
+    val dosisRecomendadaZootecnica = remember(medSeleccionado.nombre, pesoAnimalKg) {
+        val nom = medSeleccionado.nombre.lowercase()
+        when {
+            nom.contains("hierro") -> 2.0
+            nom.contains("amoxicilina") -> Math.round((pesoAnimalKg / 10.0) * 10.0) / 10.0
+            nom.contains("tilmicosina") -> Math.round((pesoAnimalKg / 15.0) * 10.0) / 10.0
+            nom.contains("oxitocina") -> 2.0
+            nom.contains("complejo b") -> Math.round((pesoAnimalKg / 20.0) * 10.0) / 10.0
+            else -> Math.round((pesoAnimalKg / 15.0) * 10.0) / 10.0
         }.coerceAtLeast(0.5)
     }
 
@@ -151,18 +291,65 @@ fun TreatmentScreen(
     val costoGuantes = if (usaGuantes) 0.18 else 0.0
     val costoTotalTratamiento = costoMedicamento + costoJeringa + costoAguja + costoYodo + costoTorunda + costoGuantes
 
-    // Vía de Administración
-    val viasAdministracion = listOf("Intramuscular (IM)", "Subcutánea (SC)", "Oral Bebedero", "Tópica", "Intravenosa (IV)")
-    var selectedVia by remember { mutableStateOf("Intramuscular (IM)") }
+    // Vías y Diagnósticos desde Catálogo Clínico (SQLite / PostgreSQL)
+    val viasItems = remember(clinicosCatalog, catalogState.catalogosClinicos) {
+        val fromRoom = clinicosCatalog.filter { it.tipoCatalogo == "VIA_ADMINISTRACION" }.map {
+            CatalogChoiceItem(
+                id = it.nombre,
+                title = it.nombre,
+                subtitle = it.subcategoria.ifBlank { "Vía estándar" },
+                badge = it.codigo
+            )
+        }
+        if (fromRoom.isNotEmpty()) fromRoom else catalogState.catalogosClinicos.filter { it.tipoCatalogo == "VIA_ADMINISTRACION" }.map {
+            CatalogChoiceItem(id = it.nombre, title = it.nombre, subtitle = it.subcategoria, badge = it.codigo)
+        }.ifEmpty {
+            listOf(
+                CatalogChoiceItem("Intramuscular (IM)", "Intramuscular (IM)", "Tabla del cuello"),
+                CatalogChoiceItem("Subcutánea (SC)", "Subcutánea (SC)", "Detrás de oreja"),
+                CatalogChoiceItem("Oral Bebedero", "Oral Bebedero", "Dosificador en agua")
+            )
+        }
+    }
+    var selectedVia by remember(viasItems) {
+        mutableStateOf(viasItems.firstOrNull()?.id ?: "Intramuscular (IM)")
+    }
 
-    // Diagnóstico o Motivo Clínico
-    val diagnosticos = listOf("Preventivo / Deficiencia neonatal", "Neumonía / Respiratorio", "Diarrea Neonatal", "Cojera / Artritis", "Metritis Postparto")
-    var selectedDiagnostico by remember { mutableStateOf("Preventivo / Deficiencia neonatal") }
+    val diagnosticosItems = remember(clinicosCatalog, catalogState.catalogosClinicos) {
+        val fromRoom = clinicosCatalog.filter { it.tipoCatalogo == "DIAGNOSTICO_CLINICO" }.map {
+            CatalogChoiceItem(
+                id = it.nombre,
+                title = it.nombre,
+                subtitle = listOfNotNull(
+                    it.subcategoria.takeIf { s -> s.isNotBlank() },
+                    if (it.diasRetiroReferencia > 0) "Retiro ref: ${it.diasRetiroReferencia}d" else null
+                ).joinToString(" • "),
+                badge = it.subcategoria,
+                category = it.subcategoria
+            )
+        }
+        if (fromRoom.isNotEmpty()) fromRoom else catalogState.catalogosClinicos.filter { it.tipoCatalogo == "DIAGNOSTICO_CLINICO" }.map {
+            CatalogChoiceItem(id = it.nombre, title = it.nombre, subtitle = it.subcategoria, badge = it.subcategoria, category = it.subcategoria)
+        }.ifEmpty {
+            listOf(
+                CatalogChoiceItem("Preventivo / Deficiencia neonatal", "Preventivo / Deficiencia neonatal", "Preventivo", "PREVENTIVO", "PREVENTIVO"),
+                CatalogChoiceItem("Neumonía / Respiratorio", "Neumonía / Respiratorio", "Respiratorio", "RESPIRATORIO", "RESPIRATORIO")
+            )
+        }
+    }
+    var selectedDiagnostico by remember(diagnosticosItems) {
+        mutableStateOf(diagnosticosItems.firstOrNull()?.id ?: "")
+    }
 
     var observations by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
     var isSaved by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    var showPatientSheet by remember { mutableStateOf(false) }
+    var showUbicacionSheet by remember { mutableStateOf(false) }
+    var showMedSheet by remember { mutableStateOf(false) }
+    var showDiagnosticoSheet by remember { mutableStateOf(false) }
 
     // Timestamp inmutable de auditoría
     val timestampActual = remember {
@@ -171,6 +358,7 @@ fun TreatmentScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Column {
                 FieldTopBar(
@@ -243,9 +431,9 @@ fun TreatmentScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     TactileButton(
-                        enabled = crotal.isNotBlank(),
+                        enabled = activeProfile.rol.puedeAplicarTratamientos && crotal.isNotBlank() && vademecum.isNotEmpty(),
                         onClick = {
-                            if (!isSaving && !isSaved && crotal.isNotBlank()) {
+                            if (!isSaving && !isSaved && activeProfile.rol.puedeAplicarTratamientos && crotal.isNotBlank() && vademecum.isNotEmpty()) {
                                 isSaving = true
                                 coroutineScope.launch {
                                     val insumosLista = mutableListOf<String>().apply {
@@ -272,7 +460,7 @@ fun TreatmentScreen(
                                         veterinarioResponsable = activeProfile.nombre,
                                         matriculaVeterinario = activeProfile.identificacion,
                                         galponJaula = galponJaula,
-                                        costoTotalEstimadoUsd = costoTotalTratamiento,
+                                        costoTotalEstimadoUsd = if (activeProfile.rol.puedeVerCostos) costoTotalTratamiento else 0.0,
                                         observaciones = observations
                                     )
                                     delay(400)
@@ -304,7 +492,9 @@ fun TreatmentScreen(
                                     text = "Guardando tratamiento...",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = FieldDarkBorder
+                                    color = FieldDarkBorder,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             } else if (isSaved) {
                                 Icon(
@@ -318,7 +508,9 @@ fun TreatmentScreen(
                                     text = "¡Tratamiento Guardado!",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = FieldDarkBorder
+                                    color = FieldDarkBorder,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             } else {
                                 Icon(
@@ -337,7 +529,9 @@ fun TreatmentScreen(
                                     text = btnText,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = FieldDarkBorder
+                                    color = FieldDarkBorder,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -347,21 +541,27 @@ fun TreatmentScreen(
         },
         containerColor = FieldBackground
     ) { innerPadding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 14.dp),
-            contentPadding = PaddingValues(vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(innerPadding),
+            contentAlignment = Alignment.TopCenter
         ) {
-            // 0. Banner si es rol Operario
-            if (activeProfile.rol == UserRole.OPERARIO) {
+            LazyColumn(
+                modifier = Modifier
+                    .widthIn(max = 640.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                contentPadding = PaddingValues(vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+            // 0. Banner si el rol no tiene permiso clínico de prescripción
+            if (!activeProfile.rol.puedeAplicarTratamientos) {
                 item {
                     RoleRestrictionWarningBanner(
                         userRole = activeProfile.rol,
-                        titulo = "Protocolo de Prescripción Veterinaria",
-                        mensaje = "Atención: La administración de fármacos e insumos requiere supervisión médica. Este tratamiento quedará auditado a tu nombre."
+                        titulo = "Modo Solo Consulta Clínica",
+                        mensaje = "Solo el Veterinario o Administrador puede prescribir y registrar tratamientos sanitarios en granja."
                     )
                 }
             }
@@ -374,7 +574,10 @@ fun TreatmentScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Tag,
                                 contentDescription = null,
@@ -386,9 +589,12 @@ fun TreatmentScreen(
                                 text = "ANIMAL DESTINO & AUDITORÍA",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = FieldPrimary,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
@@ -399,70 +605,77 @@ fun TreatmentScreen(
                                 text = "Certificado",
                                 color = FieldOnPrimary,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (catalogState.lotes.isNotEmpty() || catalogState.cerdas.isNotEmpty()) {
-                        Text(
-                            text = "Selección rápida de lote o cerda:",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = FieldOnSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            catalogState.lotes.forEach { lote ->
-                                FilterChip(
-                                    selected = crotal.equals(lote.codigo, ignoreCase = true),
-                                    onClick = {
-                                        crotal = lote.codigo
-                                        galponJaula = "${lote.galpon.ifBlank { lote.etapa }} (${lote.animales} cab.)"
-                                    },
-                                    label = { Text("${lote.codigo} · ${lote.etapa}", fontSize = 11.sp) }
-                                )
-                            }
-                            catalogState.cerdas.take(15).forEach { cerda ->
-                                FilterChip(
-                                    selected = crotal.equals(cerda.caravana, ignoreCase = true),
-                                    onClick = {
-                                        crotal = cerda.caravana
-                                        galponJaula = listOf(cerda.galpon, cerda.jaula).filter { it.isNotBlank() }.joinToString(" / ")
-                                    },
-                                    label = { Text(cerda.caravana, fontSize = 11.sp) }
-                                )
-                            }
+                    val patientSel = patientItems.firstOrNull { it.id.equals(crotal, ignoreCase = true) }
+                    DatabaseSelectorField(
+                        label = "PACIENTE / LOTE (CATÁLOGO BD) *",
+                        selectedTitle = if (!usarCrotalManual) (patientSel?.title ?: crotal) else crotal,
+                        selectedSubtitle = patientSel?.subtitle ?: if (galponJaula.isNotBlank()) "Ubicación: $galponJaula" else "",
+                        selectedBadge = patientSel?.badge.orEmpty(),
+                        placeholder = "Seleccionar cerda, cerdo o lote...",
+                        leadingIcon = Icons.Default.CrueltyFree,
+                        onClick = {
+                            usarCrotalManual = false
+                            showPatientSheet = true
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(FieldSurfaceContainerHigh)
+                            .clickable { usarCrotalManual = !usarCrotalManual }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Ingresar crotal nuevo manualmente",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = FieldOnSurface
+                        )
+                        Switch(
+                            checked = usarCrotalManual,
+                            onCheckedChange = { usarCrotalManual = it }
+                        )
                     }
 
-                    OutlinedTextField(
-                        value = crotal,
-                        onValueChange = { crotal = it.uppercase() },
-                        label = { Text("Crotal de Cerdo / Código de Lote *") },
-                        placeholder = { Text("Ej. CRD-014 o LOT-ENG-01") },
-                        leadingIcon = { Icon(Icons.Default.CrueltyFree, contentDescription = null, tint = FieldPrimary) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    if (usarCrotalManual || patientItems.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = crotal,
+                            onValueChange = { crotal = it.uppercase() },
+                            label = { Text("Crotal de Cerdo / Código de Lote *") },
+                            placeholder = { Text("Ej. CRD-014 o LOT-ENG-01") },
+                            leadingIcon = { Icon(Icons.Default.CrueltyFree, contentDescription = null, tint = FieldPrimary) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    OutlinedTextField(
-                        value = galponJaula,
-                        onValueChange = { galponJaula = it },
-                        label = { Text("Galpón / Jaula (opcional)") },
-                        placeholder = { Text("Ubicación en granja") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                    val ubicacionSel = ubicacionItems.firstOrNull { it.id.equals(galponJaula, ignoreCase = true) }
+                    DatabaseSelectorField(
+                        label = "UBICACIÓN (GALPÓN / JAULA)",
+                        selectedTitle = galponJaula,
+                        selectedSubtitle = ubicacionSel?.subtitle.orEmpty(),
+                        selectedBadge = ubicacionSel?.badge.orEmpty(),
+                        placeholder = "Seleccionar galpón o jaula...",
+                        leadingIcon = Icons.Default.Apartment,
+                        compact = true,
+                        onClick = { showUbicacionSheet = true }
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -485,14 +698,22 @@ fun TreatmentScreen(
                                 text = timestampActual,
                                 fontSize = 11.sp,
                                 color = FieldOnSurfaceVariant,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                         Text(
                             text = "Responsable: ${activeProfile.nombre}",
                             fontSize = 11.sp,
                             color = FieldPrimary,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 8.dp)
                         )
                     }
                 }
@@ -506,7 +727,10 @@ fun TreatmentScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Vaccines,
                                 contentDescription = null,
@@ -518,79 +742,48 @@ fun TreatmentScreen(
                                 text = "MEDICAMENTO & SALDO DE FRASCO",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = FieldPrimary,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Descuento en ml",
                             style = MaterialTheme.typography.labelSmall,
                             color = FieldPrimary,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Selector de medicamento
-                    vademecum.forEachIndexed { index, med ->
-                        val isSelected = selectedMedIndex == index
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) FieldPrimaryContainer else FieldSurfaceContainerLowest)
-                                .border(
-                                    BorderStroke(
-                                        width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) FieldDarkBorder else FieldOutline
-                                    ),
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .clickable { selectedMedIndex = index }
-                                .padding(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(
-                                        imageVector = Icons.Default.Medication,
-                                        contentDescription = null,
-                                        tint = if (isSelected) FieldOnPrimary else FieldPrimary,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f, fill = false)) {
-                                        Text(
-                                            text = med.nombre,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) FieldOnPrimary else FieldOnSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${med.especificacion} • Capacidad: ${med.volumenFrascoMl.toInt()} ml",
-                                            fontSize = 11.sp,
-                                            color = if (isSelected) FieldOnPrimary.copy(alpha = 0.85f) else FieldOnSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = FieldOnPrimary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
+                    DatabaseSelectorField(
+                        label = "MEDICAMENTO DEL VADEMÉCUM (BD) *",
+                        selectedTitle = if (vademecum.isNotEmpty()) medSeleccionado.nombre else "",
+                        selectedSubtitle = if (vademecum.isNotEmpty()) {
+                            "${medSeleccionado.especificacion} • Cap. ${medSeleccionado.volumenFrascoMl.toInt()} ml • Retiro ${medSeleccionado.diasRetiro}d"
+                        } else "",
+                        selectedBadge = medSeleccionado.sku,
+                        placeholder = "Sincroniza catálogo para cargar medicamentos...",
+                        leadingIcon = Icons.Default.Medication,
+                        enabled = vademecum.isNotEmpty(),
+                        onClick = { showMedSheet = true }
+                    )
+
+                    if (kitCatalog.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Stock descartables BD: " + kitCatalog.take(4).joinToString(" • ") {
+                                "${it.nombre.substringBefore(" (")} (${it.stockActual.toInt()})"
+                            },
+                            fontSize = 10.sp,
+                            color = FieldOnSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -610,7 +803,10 @@ fun TreatmentScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Calculate,
                                         contentDescription = null,
@@ -622,7 +818,9 @@ fun TreatmentScreen(
                                         text = "Cálculo Zootécnico por Peso Vivo",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = FieldPrimary
+                                        color = FieldPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 Icon(
@@ -683,24 +881,30 @@ fun TreatmentScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Column {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = "Dosis clínica calculada:",
                                                     fontSize = 11.sp,
-                                                    color = FieldOnSurfaceVariant
+                                                    color = FieldOnSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                                 Text(
                                                     text = "$dosisRecomendadaZootecnica ml",
                                                     style = MaterialTheme.typography.titleLarge,
                                                     fontWeight = FontWeight.ExtraBold,
-                                                    color = FieldGreenPositive
+                                                    color = FieldGreenPositive,
+                                                    maxLines = 1
                                                 )
                                             }
+
+                                            Spacer(modifier = Modifier.width(8.dp))
 
                                             TactileButton(
                                                 text = "Aplicar Dosis",
                                                 icon = Icons.Default.Check,
                                                 minHeight = 40.dp,
+                                                compact = true,
                                                 backgroundColor = FieldPrimary,
                                                 contentColor = FieldOnPrimary,
                                                 onClick = {
@@ -836,22 +1040,31 @@ fun TreatmentScreen(
                                 Row(verticalAlignment = Alignment.Bottom) {
                                     Text(
                                         text = String.format("%.1f", volumenRestanteFrasco),
-                                        style = MaterialTheme.typography.displayLarge,
+                                        style = MaterialTheme.typography.headlineLarge,
                                         fontWeight = FontWeight.Black,
-                                        color = FieldPrimary
+                                        color = FieldPrimary,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                     Text(
                                         text = " ml",
-                                        style = MaterialTheme.typography.headlineMedium,
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = FieldPrimary
+                                        color = FieldPrimary,
+                                        maxLines = 1
                                     )
                                 }
                                 Text(
                                     text = "(Inicial: ${volumenInicialFrasco.toInt()} ml - Dosis: ${String.format("%.1f", dose)} ml)",
                                     fontSize = 11.sp,
                                     color = FieldOnSurfaceVariant,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.End,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(start = 8.dp)
                                 )
                             }
 
@@ -879,7 +1092,10 @@ fun TreatmentScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.MedicalInformation,
                                 contentDescription = null,
@@ -891,9 +1107,12 @@ fun TreatmentScreen(
                                 text = "KIT DE INSUMOS & MATERIAL DESCARTABLE",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = FieldPrimary,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
@@ -904,7 +1123,8 @@ fun TreatmentScreen(
                                 text = "Salidas Kardex",
                                 color = FieldSecondaryFixed,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -927,49 +1147,56 @@ fun TreatmentScreen(
                             .clickable { usaJeringa = !usaJeringa }
                             .padding(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Checkbox(
                                     checked = usaJeringa,
                                     onCheckedChange = { usaJeringa = it },
                                     colors = CheckboxDefaults.colors(checkedColor = FieldPrimary)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "Jeringa Descartable (1 unidad)",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = FieldOnSurface
+                                        color = FieldOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = if (activeProfile.rol.puedeVerCostos) "Descuenta: -1 ud de $tipoJeringa ($0.12 USD)" else "Descuenta: -1 ud de $tipoJeringa",
                                         fontSize = 11.sp,
-                                        color = FieldOnSurfaceVariant
+                                        color = FieldOnSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                             if (usaJeringa) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.padding(start = 44.dp, top = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     listOf("3 ml", "5 ml", "10 ml").forEach { cap ->
                                         val isThis = tipoJeringa.contains(cap)
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
+                                                .clip(RoundedCornerShape(6.dp))
                                                 .background(if (isThis) FieldPrimary else FieldSurfaceContainerLowest)
-                                                .border(BorderStroke(1.dp, FieldDarkBorder), RoundedCornerShape(4.dp))
+                                                .border(BorderStroke(1.dp, FieldDarkBorder), RoundedCornerShape(6.dp))
                                                 .clickable { tipoJeringa = "Jeringa $cap" }
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                .padding(horizontal = 10.dp, vertical = 4.dp)
                                         ) {
                                             Text(
                                                 text = cap,
-                                                fontSize = 9.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isThis) FieldSecondaryFixed else FieldOnSurface
+                                                color = if (isThis) FieldSecondaryFixed else FieldOnSurface,
+                                                maxLines = 1
                                             )
                                         }
                                     }
@@ -990,49 +1217,56 @@ fun TreatmentScreen(
                             .clickable { usaAguja = !usaAguja }
                             .padding(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Checkbox(
                                     checked = usaAguja,
                                     onCheckedChange = { usaAguja = it },
                                     colors = CheckboxDefaults.colors(checkedColor = FieldPrimary)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "Aguja Hipodérmica (1 unidad)",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = FieldOnSurface
+                                        color = FieldOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = if (activeProfile.rol.puedeVerCostos) "Descuenta: -1 ud de $tipoAguja ($0.06 USD)" else "Descuenta: -1 ud de $tipoAguja",
                                         fontSize = 11.sp,
-                                        color = FieldOnSurfaceVariant
+                                        color = FieldOnSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                             if (usaAguja) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.padding(start = 44.dp, top = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     listOf("16G", "18G", "20G").forEach { cal ->
                                         val isThis = tipoAguja.contains(cal)
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
+                                                .clip(RoundedCornerShape(6.dp))
                                                 .background(if (isThis) FieldPrimary else FieldSurfaceContainerLowest)
-                                                .border(BorderStroke(1.dp, FieldDarkBorder), RoundedCornerShape(4.dp))
+                                                .border(BorderStroke(1.dp, FieldDarkBorder), RoundedCornerShape(6.dp))
                                                 .clickable { tipoAguja = "Aguja $cal x 1\"" }
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                .padding(horizontal = 10.dp, vertical = 4.dp)
                                         ) {
                                             Text(
                                                 text = cal,
-                                                fontSize = 9.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isThis) FieldSecondaryFixed else FieldOnSurface
+                                                color = if (isThis) FieldSecondaryFixed else FieldOnSurface,
+                                                maxLines = 1
                                             )
                                         }
                                     }
@@ -1058,27 +1292,35 @@ fun TreatmentScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Checkbox(
                                     checked = usaYodo,
                                     onCheckedChange = { usaYodo = it },
                                     colors = CheckboxDefaults.colors(checkedColor = FieldPrimary)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Yodo Povidona 10% Tópico (${volumenYodoMl.toInt()} ml)",
+                                        text = "Yodo Povidona 10% (${volumenYodoMl.toInt()} ml)",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = FieldOnSurface
+                                        color = FieldOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = if (activeProfile.rol.puedeVerCostos) "Desinfección previa y sellado: -${volumenYodoMl.toInt()} ml ($0.08 USD)" else "Desinfección previa y sellado: -${volumenYodoMl.toInt()} ml",
+                                        text = if (activeProfile.rol.puedeVerCostos) "Desinfección y sellado: -${volumenYodoMl.toInt()} ml ($0.08 USD)" else "Desinfección y sellado: -${volumenYodoMl.toInt()} ml",
                                         fontSize = 11.sp,
-                                        color = FieldOnSurfaceVariant
+                                        color = FieldOnSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
+                            Spacer(modifier = Modifier.width(6.dp))
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
@@ -1089,7 +1331,8 @@ fun TreatmentScreen(
                                     text = "Antiséptico",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = FieldOnPrimary
+                                    color = FieldOnPrimary,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -1106,25 +1349,37 @@ fun TreatmentScreen(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = 52.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (usaTorunda) FieldSecondaryContainer else FieldSurfaceContainerLowest)
                                 .border(BorderStroke(1.5.dp, FieldDarkBorder), RoundedCornerShape(8.dp))
                                 .clickable { usaTorunda = !usaTorunda }
-                                .padding(8.dp)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.CenterStart
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = usaTorunda,
-                                    onCheckedChange = { usaTorunda = it },
-                                    colors = CheckboxDefaults.colors(checkedColor = FieldPrimary)
+                                Icon(
+                                    imageVector = if (usaTorunda) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                    contentDescription = null,
+                                    tint = if (usaTorunda) FieldPrimary else FieldOnSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Column {
-                                    Text(text = "Torunda Algodón", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FieldOnSurface)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Torunda Algodón",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = FieldOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                     Text(
                                         text = if (activeProfile.rol.puedeVerCostos) "-1 ud ($0.03)" else "-1 unidad",
                                         fontSize = 10.sp,
-                                        color = FieldOnSurfaceVariant
+                                        color = FieldOnSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -1134,25 +1389,37 @@ fun TreatmentScreen(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = 52.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (usaGuantes) FieldSecondaryContainer else FieldSurfaceContainerLowest)
                                 .border(BorderStroke(1.5.dp, FieldDarkBorder), RoundedCornerShape(8.dp))
                                 .clickable { usaGuantes = !usaGuantes }
-                                .padding(8.dp)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.CenterStart
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = usaGuantes,
-                                    onCheckedChange = { usaGuantes = it },
-                                    colors = CheckboxDefaults.colors(checkedColor = FieldPrimary)
+                                Icon(
+                                    imageVector = if (usaGuantes) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                    contentDescription = null,
+                                    tint = if (usaGuantes) FieldPrimary else FieldOnSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Column {
-                                    Text(text = "Guantes Nitrilo", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FieldOnSurface)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Guantes Nitrilo",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = FieldOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                     Text(
                                         text = if (activeProfile.rol.puedeVerCostos) "-1 par ($0.18)" else "-1 par",
                                         fontSize = 10.sp,
-                                        color = FieldOnSurfaceVariant
+                                        color = FieldOnSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -1173,79 +1440,55 @@ fun TreatmentScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    val viaSel = viasItems.firstOrNull { it.id == selectedVia }
                     Text(
-                        text = "Vía Seleccionada:",
+                        text = "VÍA DE ADMINISTRACIÓN (BD):",
                         style = MaterialTheme.typography.labelSmall,
                         color = FieldOnSurfaceVariant,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        viasAdministracion.take(3).forEach { via ->
-                            val isSelected = selectedVia == via
+                        viasItems.forEach { viaItem ->
+                            val isSelected = selectedVia == viaItem.id
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isSelected) FieldPrimaryContainer else FieldSurfaceContainerLowest)
-                                    .border(BorderStroke(2.dp, FieldDarkBorder), RoundedCornerShape(8.dp))
-                                    .clickable { selectedVia = via },
+                                    .border(BorderStroke(if (isSelected) 2.dp else 1.5.dp, FieldDarkBorder), RoundedCornerShape(8.dp))
+                                    .clickable { selectedVia = viaItem.id }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = via,
-                                    fontSize = 10.sp,
+                                    text = viaItem.title,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) FieldOnPrimary else FieldOnSurface
+                                    color = if (isSelected) FieldOnPrimary else FieldOnSurface,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    Text(
-                        text = "Diagnóstico / Motivo Clínico:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = FieldOnSurfaceVariant,
-                        fontWeight = FontWeight.Bold
+                    val diagSel = diagnosticosItems.firstOrNull { it.id == selectedDiagnostico }
+                    DatabaseSelectorField(
+                        label = "DIAGNÓSTICO / MOTIVO CLÍNICO (BD) *",
+                        selectedTitle = diagSel?.title ?: selectedDiagnostico,
+                        selectedSubtitle = diagSel?.subtitle.orEmpty(),
+                        selectedBadge = diagSel?.badge.orEmpty(),
+                        placeholder = "Seleccionar diagnóstico clínico...",
+                        leadingIcon = Icons.Default.MedicalInformation,
+                        onClick = { showDiagnosticoSheet = true }
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    diagnosticos.forEach { diag ->
-                        val isSelected = selectedDiagnostico == diag
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isSelected) FieldSecondaryContainer else FieldSurfaceContainerLowest)
-                                .border(BorderStroke(1.dp, FieldDarkBorder), RoundedCornerShape(6.dp))
-                                .clickable { selectedDiagnostico = diag }
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = if (isSelected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
-                                    contentDescription = null,
-                                    tint = if (isSelected) FieldPrimary else FieldOnSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = diag,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = FieldOnSurface
-                                )
-                            }
-                        }
-                    }
                 }
             }
 
@@ -1265,7 +1508,10 @@ fun TreatmentScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.AssignmentTurnedIn,
                                     contentDescription = null,
@@ -1277,15 +1523,22 @@ fun TreatmentScreen(
                                     text = "RESUMEN DE DEDUCCIÓN KARDEX",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = FieldPrimary
+                                    color = FieldPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            Text(
-                                text = "Total: $ ${String.format("%.2f", costoTotalTratamiento)} USD",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
-                                color = FieldPrimary
-                            )
+                            if (activeProfile.rol.puedeVerCostos) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Total: $ ${String.format("%.2f", costoTotalTratamiento)} USD",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = FieldPrimary,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
 
                         HorizontalDivider(color = FieldDarkBorder.copy(alpha = 0.2f), thickness = 1.dp)
@@ -1345,5 +1598,90 @@ fun TreatmentScreen(
                 }
             }
         }
+        }
+    }
+
+    if (showPatientSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Paciente o Lote",
+            subtitle = "Cerdas, cerdos individuales y lotes activos",
+            items = patientItems,
+            selectedId = crotal,
+            categories = patientItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            emptyMessage = "No hay animales o lotes sincronizados.",
+            onSelect = { item ->
+                crotal = item.id
+                val foundCerda = catalogState.cerdas.firstOrNull { it.caravana.equals(item.id, ignoreCase = true) }
+                val foundCerdo = cerdosFromDb.firstOrNull { it.codigoCrotal.equals(item.id, ignoreCase = true) }
+                val foundLote = catalogState.lotes.firstOrNull { it.codigo.equals(item.id, ignoreCase = true) }
+                when {
+                    foundCerda != null -> {
+                        galponJaula = listOf(foundCerda.galpon, foundCerda.jaula).filter { it.isNotBlank() }.joinToString(" / ")
+                    }
+                    foundCerdo != null -> {
+                        galponJaula = listOf(foundCerdo.idGalpon, foundCerdo.jaula).filter { it.isNotBlank() }.joinToString(" / ")
+                    }
+                    foundLote != null -> {
+                        galponJaula = "${foundLote.galpon.ifBlank { foundLote.etapa }} (${foundLote.animales} cab.)"
+                    }
+                }
+                showPatientSheet = false
+            },
+            onDismiss = { showPatientSheet = false }
+        )
+    }
+
+    if (showUbicacionSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Ubicación en Granja",
+            subtitle = "Galpones y jaulas activas",
+            items = ubicacionItems,
+            selectedId = galponJaula,
+            categories = ubicacionItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                galponJaula = item.id
+                showUbicacionSheet = false
+            },
+            onDismiss = { showUbicacionSheet = false }
+        )
+    }
+
+    if (showMedSheet) {
+        val medItems = vademecum.mapIndexed { idx, med ->
+            CatalogChoiceItem(
+                id = idx.toString(),
+                title = med.nombre,
+                subtitle = "${med.especificacion} • Retiro: ${med.diasRetiro}d",
+                badge = med.sku.ifBlank { "MED" },
+                category = if (med.especificacion.startsWith("BIO")) "BIO" else "MED"
+            )
+        }
+        SearchableCatalogBottomSheet(
+            title = "Vademécum Farmacéutico (BD)",
+            subtitle = "Medicamentos y biológicos con stock",
+            items = medItems,
+            selectedId = safeMedIndex.toString(),
+            categories = medItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                item.id.toIntOrNull()?.let { selectedMedIndex = it }
+                showMedSheet = false
+            },
+            onDismiss = { showMedSheet = false }
+        )
+    }
+
+    if (showDiagnosticoSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Diagnóstico Clínico (BD)",
+            subtitle = "Motivos estandarizados para trazabilidad",
+            items = diagnosticosItems,
+            selectedId = selectedDiagnostico,
+            categories = diagnosticosItems.map { it.category }.filter { it.isNotBlank() }.distinct(),
+            onSelect = { item ->
+                selectedDiagnostico = item.id
+                showDiagnosticoSheet = false
+            },
+            onDismiss = { showDiagnosticoSheet = false }
+        )
     }
 }

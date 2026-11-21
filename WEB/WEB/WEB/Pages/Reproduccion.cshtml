@@ -480,19 +480,46 @@
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                    <label class="block text-xs font-semibold text-on-surface mb-1">Técnica</label>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Técnica (BD)</label>
                     <select name="tecnica" class="w-full h-9 px-2.5 rounded-lg border border-outline-variant text-xs text-on-surface">
-                        <option value="inseminacion_post_cervical" selected>Post-Cervical (PCAI)</option>
-                        <option value="inseminacion_cervical">Cervical Clásica</option>
-                        <option value="monta_natural">Monta Natural</option>
+                        @if (Model.Catalogos.TecnicasIa.Count > 0)
+                        {
+                            @foreach (var t in Model.Catalogos.TecnicasIa)
+                            {
+                                var valTecnica = string.IsNullOrWhiteSpace(t.Subcategoria) ? t.Nombre : t.Subcategoria;
+                                <option value="@valTecnica">@t.Nombre</option>
+                            }
+                        }
+                        else
+                        {
+                            <option value="inseminacion_post_cervical" selected>Post-Cervical (PCAI)</option>
+                            <option value="inseminacion_cervical">Cervical Clásica</option>
+                            <option value="monta_natural">Monta Natural</option>
+                        }
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-on-surface mb-1">Turno / Dosis</label>
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Turno / Dosis (BD)</label>
                     <select name="turno" class="w-full h-9 px-2.5 rounded-lg border border-outline-variant text-xs text-on-surface">
-                        <option value="1_dosis_manana" selected>1ra Dosis (Mañana)</option>
-                        <option value="2_dosis_tarde">2da Dosis (Tarde)</option>
-                        <option value="3_dosis_refuerzo">3ra Dosis (Refuerzo)</option>
+                        @if (Model.Catalogos.DosisIaHorarios.Count > 0)
+                        {
+                            @foreach (var h in Model.Catalogos.DosisIaHorarios)
+                            {
+                                var valTurno = h.Codigo switch {
+                                    "IA-1-MAN" => "1_dosis_manana",
+                                    "IA-2-TAR" => "2_dosis_tarde",
+                                    "IA-3-REF" => "3_dosis_refuerzo",
+                                    _ => h.Nombre
+                                };
+                                <option value="@valTurno">@h.Nombre</option>
+                            }
+                        }
+                        else
+                        {
+                            <option value="1_dosis_manana" selected>1ra Dosis (Mañana)</option>
+                            <option value="2_dosis_tarde">2da Dosis (Tarde)</option>
+                            <option value="3_dosis_refuerzo">3ra Dosis (Refuerzo)</option>
+                        }
                     </select>
                 </div>
                 <div>
@@ -564,8 +591,26 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-on-surface mb-1">Jaula de Maternidad *</label>
-                    <input type="text" name="jaulaMaternidad" id="parto-jaula" value="M-01" required class="w-full h-9 px-3 rounded-lg border border-outline-variant text-xs font-semibold font-mono text-on-surface" />
+                    <label class="block text-xs font-semibold text-on-surface mb-1">Jaula de Maternidad (BD) *</label>
+                    @{
+                        var jaulasMat = Model.Catalogos.Jaulas
+                            .Where(j => (j.EtapaZootecnica ?? "").Contains("Maternidad", StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        if (jaulasMat.Count == 0) jaulasMat = Model.Catalogos.Jaulas;
+                    }
+                    <select name="jaulaMaternidad" id="parto-jaula" required class="w-full h-9 px-2.5 rounded-lg border border-outline-variant text-xs font-semibold font-mono text-on-surface">
+                        @if (jaulasMat.Count > 0)
+                        {
+                            @foreach (var j in jaulasMat)
+                            {
+                                <option value="@j.Codigo">@j.Codigo — @j.Nombre (@j.OcupacionActual/@j.CapacidadMaxima)</option>
+                            }
+                        }
+                        else
+                        {
+                            <option value="M-01">M-01</option>
+                        }
+                    </select>
                 </div>
             </div>
 

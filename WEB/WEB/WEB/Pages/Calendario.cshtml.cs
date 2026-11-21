@@ -17,6 +17,7 @@ public class CalendarioModel : PageModel
     }
 
     public CalendarioPageViewModel Data { get; set; } = new();
+    public CatalogosFormularioWebViewModel Catalogos { get; set; } = new();
 
     [BindProperty(SupportsGet = true)]
     public DateTime? Fecha { get; set; }
@@ -38,7 +39,16 @@ public class CalendarioModel : PageModel
 
     public async Task OnGetAsync()
     {
-        Data = await _dataService.GetCalendarioPageDataAsync(Fecha, Mes, Anio, Tipo, Estado, Rol);
+        Data = await _dataService.GetCalendarioPageDataAsync(
+            Fecha,
+            Mes,
+            Anio,
+            Tipo,
+            Estado,
+            Rol,
+            _roleService.CurrentRoleName,
+            _roleService.CurrentUser.Nombre);
+        Catalogos = await _dataService.GetCatalogosFormularioWebAsync();
     }
 
     [RequierePolitica(Policies.TareasGestionar)]
@@ -81,7 +91,7 @@ public class CalendarioModel : PageModel
 
     public async Task<IActionResult> OnPostResolverNotificacionAsync([FromForm] Guid notifId)
     {
-        await _dataService.ResolverNotificacionAsync(notifId);
+        await _dataService.ResolverNotificacionAsync(notifId, _roleService.CurrentRoleName);
         TempData["Toast"] = "success: Notificación resuelta.";
         return RedirectToPage(new { Fecha, Mes, Anio, Tipo, Estado, Rol });
     }

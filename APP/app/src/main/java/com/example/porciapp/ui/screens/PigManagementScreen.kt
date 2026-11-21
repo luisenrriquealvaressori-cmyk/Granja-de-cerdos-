@@ -6,10 +6,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -24,9 +26,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.porciapp.data.local.entities.CatClinicoEntity
+import com.example.porciapp.data.local.entities.CatGalponEntity
+import com.example.porciapp.data.local.entities.CatJaulaEntity
 import com.example.porciapp.data.local.entities.CerdoEntity
 import com.example.porciapp.data.model.UserProfile
 import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.data.repository.CatalogStore
 import com.example.porciapp.ui.components.*
 import com.example.porciapp.ui.theme.*
@@ -139,6 +145,10 @@ fun PigManagementScreen(
     onBackClick: () -> Unit,
     activeProfile: UserProfile = UserProfile.defaultFor(UserRole.ADMINISTRADOR),
     cerdosFromDb: List<CerdoEntity> = emptyList(),
+    galponesCatalog: List<CatGalponEntity> = emptyList(),
+    jaulasCatalog: List<CatJaulaEntity> = emptyList(),
+    clinicosCatalog: List<CatClinicoEntity> = emptyList(),
+    uiPrefs: WorkspaceUiPreferences = WorkspaceUiPreferences.defaultFor(activeProfile.rol),
     onSaveCerdo: (CerdoEntity) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -148,32 +158,52 @@ fun PigManagementScreen(
     var filtroEtapa by remember { mutableStateOf("Todas") }
     var busquedaQuery by remember { mutableStateOf("") }
 
-    // Lista de jaulas/corrales reales desde el catálogo del servidor (fallback estándar 5x3m)
-    val jaulasList = remember(catalogState.lotes) {
+    // Lista de jaulas/corrales reales desde el catálogo del servidor (Room jaulasCatalog / catalogState.jaulas)
+    val jaulasList = remember(jaulasCatalog, catalogState.jaulas, catalogState.lotes) {
         mutableStateListOf<JaulaInfo>().apply {
-            if (catalogState.lotes.isNotEmpty()) {
-                catalogState.lotes.forEach { lote ->
-                    add(
-                        JaulaInfo(
-                            codigo = lote.codigo,
-                            nombre = "${lote.galpon.ifBlank { "Galpón" }} · ${lote.codigo}",
-                            etapa = lote.etapa.ifBlank { "Producción" },
-                            capacidadMaxima = maxOf(20, lote.animales),
-                            ocupacionActual = lote.animales,
-                            tipoInstalacion = "Corral / Jaula estándar 5×3m (15 m²)"
+            when {
+                jaulasCatalog.isNotEmpty() -> {
+                    jaulasCatalog.forEach { j ->
+                        add(
+                            JaulaInfo(
+                                codigo = j.codigo,
+                                nombre = "${j.galponNombre.ifBlank { j.galponCodigo }} · ${j.nombre}",
+                                etapa = j.etapaZootecnica.ifBlank { "Producción" },
+                                capacidadMaxima = maxOf(1, j.capacidadMaxima),
+                                ocupacionActual = j.ocupacionActual,
+                                tipoInstalacion = "Jaula / Corral (${j.galponNombre})"
+                            )
                         )
-                    )
+                    }
                 }
-            } else {
-                addAll(
-                    listOf(
-                        JaulaInfo("J-MAT-01", "Maternidad - Jaula 01", "Maternidad", 15, 0, "Jaula paridera 5×3m"),
-                        JaulaInfo("C-PREC-01", "Precebo - Corral 01", "Precebo", 20, 0, "Corral recría 5×3m (máx 20 lechones)"),
-                        JaulaInfo("C-CREC-01", "Crecimiento - Corral 01", "Crecimiento", 15, 0, "Corral levante 5×3m"),
-                        JaulaInfo("C-ENG-01", "Engorde - Corral 01", "Engorde", 6, 0, "Corral acabado 5×3m (máx 6 adultos)"),
-                        JaulaInfo("J-GEST-01", "Gestación - Jaula 01", "Gestación", 6, 0, "Corral/jaula gestación")
-                    )
-                )
+                catalogState.jaulas.isNotEmpty() -> {
+                    catalogState.jaulas.forEach { j ->
+                        add(
+                            JaulaInfo(
+                                codigo = j.codigo,
+                                nombre = "${j.galponNombre.ifBlank { j.galponCodigo }} · ${j.nombre}",
+                                etapa = j.etapaZootecnica.ifBlank { "Producción" },
+                                capacidadMaxima = maxOf(1, j.capacidadMaxima),
+                                ocupacionActual = j.ocupacionActual,
+                                tipoInstalacion = "Jaula / Corral (${j.galponNombre})"
+                            )
+                        )
+                    }
+                }
+                catalogState.lotes.isNotEmpty() -> {
+                    catalogState.lotes.forEach { lote ->
+                        add(
+                            JaulaInfo(
+                                codigo = lote.codigo,
+                                nombre = "${lote.galpon.ifBlank { "Galpón" }} · ${lote.codigo}",
+                                etapa = lote.etapa.ifBlank { "Producción" },
+                                capacidadMaxima = maxOf(20, lote.animales),
+                                ocupacionActual = lote.animales,
+                                tipoInstalacion = "Corral / Lote activo"
+                            )
+                        )
+                    }
+                }
             }
         }
     }
@@ -239,6 +269,7 @@ fun PigManagementScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -247,12 +278,16 @@ fun PigManagementScreen(
                             text = "Padrón & Zootecnia Porcina",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = FieldTextPrimary
+                            color = FieldTextPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Text(
                             text = "${cerdosList.size} cerdos identificados | Ocupación Jaulas",
                             style = MaterialTheme.typography.bodySmall,
-                            color = FieldTextSecondary
+                            color = FieldTextSecondary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 },
@@ -268,6 +303,7 @@ fun PigManagementScreen(
                 actions = {
                     // Badge del rol activo
                     Surface(
+                        modifier = Modifier.padding(end = 8.dp),
                         color = when (activeProfile.rol) {
                             UserRole.ADMINISTRADOR -> FieldPrimary.copy(alpha = 0.15f)
                             UserRole.VETERINARIO -> Color(0xFF0F766E).copy(alpha = 0.15f)
@@ -278,6 +314,7 @@ fun PigManagementScreen(
                         Text(
                             text = activeProfile.rol.etiqueta,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            maxLines = 1,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = when (activeProfile.rol) {
@@ -305,11 +342,17 @@ fun PigManagementScreen(
         },
         containerColor = FieldBackground
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            contentAlignment = Alignment.TopCenter
         ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 640.dp)
+                    .fillMaxSize()
+            ) {
             // Banner de Auditoría Operativa
             AuditWarningBanner(
                 mensaje = "Edición zootécnica de piara. Cambiar la fecha de nacimiento recalcula automáticamente la edad, el plan de vacunas y las tomas de alimento."
@@ -324,13 +367,27 @@ fun PigManagementScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Padrón de Cerdos (${cerdosList.size})", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text(
+                            text = "Padrón de Cerdos (${cerdosList.size})",
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    },
                     icon = { Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Jaulas & Capacidad (${jaulasList.size})", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text(
+                            text = "Jaulas & Capacidad (${jaulasList.size})",
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    },
                     icon = { Icon(Icons.Default.Fence, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
             }
@@ -454,6 +511,7 @@ fun PigManagementScreen(
                                 text = "Limpiar Filtros",
                                 icon = Icons.Default.FilterAltOff,
                                 minHeight = 44.dp,
+                                compact = true,
                                 onClick = {
                                     busquedaQuery = ""
                                     filtroEtapa = "Todas"
@@ -506,6 +564,7 @@ fun PigManagementScreen(
                 }
             }
         }
+        }
     }
 
     // =========================================================================
@@ -515,13 +574,26 @@ fun PigManagementScreen(
         CerdoEditDialog(
             cerdoActual = editingCerdo,
             jaulasDisponibles = jaulasList,
+            galponesCatalog = galponesCatalog,
+            jaulasCatalog = jaulasCatalog,
+            clinicosCatalog = clinicosCatalog,
+            catalogGalpones = catalogState.galpones,
+            catalogJaulas = catalogState.jaulas,
+            catalogLineas = catalogState.lineasGeneticas,
+            uiPrefs = uiPrefs,
             onDismiss = { showEditDialog = false },
-            onConfirm = { nuevoCerdo ->
+            onConfirm = { nuevoCerdo, galponCodigoResuelto ->
                 val index = cerdosList.indexOfFirst { it.id == nuevoCerdo.id }
                 if (index >= 0) {
                     cerdosList[index] = nuevoCerdo
                 } else {
                     cerdosList.add(0, nuevoCerdo)
+                }
+
+                val resolvedGalponId = galponCodigoResuelto.ifBlank {
+                    jaulasCatalog.firstOrNull { it.codigo.equals(nuevoCerdo.jaula, ignoreCase = true) }?.galponCodigo
+                        ?: catalogState.jaulas.firstOrNull { it.codigo.equals(nuevoCerdo.jaula, ignoreCase = true) }?.galponCodigo
+                        ?: uiPrefs.galponPredeterminado.ifBlank { "GALP-01" }
                 }
 
                 // Guardar en Room SQLite y Outbox
@@ -530,7 +602,7 @@ fun PigManagementScreen(
                     codigoCrotal = nuevoCerdo.crotal,
                     sexo = nuevoCerdo.sexo.uppercase(Locale.getDefault()),
                     raza = nuevoCerdo.raza,
-                    idGalpon = "GALP-01",
+                    idGalpon = resolvedGalponId,
                     jaula = nuevoCerdo.jaula,
                     estado = nuevoCerdo.etapaClasificada.uppercase(Locale.getDefault()),
                     fechaNacimiento = nuevoCerdo.fechaNacimientoLong,
@@ -686,12 +758,20 @@ private fun CerdoCardItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Icon(Icons.Default.Vaccines, contentDescription = null, tint = Color(0xFFE11D48), modifier = Modifier.size(16.dp))
                     Text(
                         text = "Próx: ${cerdo.proximaVacuna.nombre} (Día ${cerdo.proximaVacuna.diaVida})",
                         fontSize = 11.sp,
-                        color = FieldTextSecondary
+                        color = FieldTextSecondary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
 
@@ -806,22 +886,156 @@ private fun JaulaCapacidadCard(jaula: JaulaInfo) {
     }
 }
 
-// Diálogo de Registro y Edición de Cerdo con Cálculo en Vivo
+// Diálogo de Registro y Edición de Cerdo con Cálculo en Vivo y Selectores de Base de Datos
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CerdoEditDialog(
     cerdoActual: CerdoZootecnicoItem?,
     jaulasDisponibles: List<JaulaInfo>,
+    galponesCatalog: List<CatGalponEntity> = emptyList(),
+    jaulasCatalog: List<CatJaulaEntity> = emptyList(),
+    clinicosCatalog: List<CatClinicoEntity> = emptyList(),
+    catalogGalpones: List<com.example.porciapp.data.repository.CatalogGalpon> = emptyList(),
+    catalogJaulas: List<com.example.porciapp.data.repository.CatalogJaula> = emptyList(),
+    catalogLineas: List<String> = emptyList(),
+    uiPrefs: WorkspaceUiPreferences = WorkspaceUiPreferences(),
     onDismiss: () -> Unit,
-    onConfirm: (CerdoZootecnicoItem) -> Unit
+    onConfirm: (CerdoZootecnicoItem, String) -> Unit
 ) {
+    val galponesOpciones = remember(galponesCatalog, catalogGalpones) {
+        when {
+            galponesCatalog.isNotEmpty() -> galponesCatalog.map { g ->
+                CatalogChoiceItem(
+                    id = g.codigo,
+                    title = "${g.nombre} (${g.codigo})",
+                    subtitle = "${g.tipoSistema.ifBlank { "Producción" }} • Cap: ${g.capacidad}",
+                    badge = g.codigo,
+                    category = g.tipoSistema.ifBlank { "General" }
+                )
+            }
+            catalogGalpones.isNotEmpty() -> catalogGalpones.map { g ->
+                CatalogChoiceItem(
+                    id = g.codigo,
+                    title = "${g.nombre} (${g.codigo})",
+                    subtitle = "${g.tipoSistema.ifBlank { "Producción" }} • Cap: ${g.capacidad}",
+                    badge = g.codigo,
+                    category = g.tipoSistema.ifBlank { "General" }
+                )
+            }
+            else -> emptyList()
+        }
+    }
+
+    val allJaulasConGalpon = remember(jaulasCatalog, catalogJaulas, jaulasDisponibles) {
+        when {
+            jaulasCatalog.isNotEmpty() -> jaulasCatalog.map { j ->
+                j.galponCodigo to CatalogChoiceItem(
+                    id = j.codigo,
+                    title = "${j.nombre} (${j.codigo})",
+                    subtitle = "${j.galponNombre.ifBlank { j.galponCodigo }} • ${j.etapaZootecnica.ifBlank { "General" }}",
+                    badge = "${j.ocupacionActual}/${j.capacidadMaxima}",
+                    category = j.galponNombre.ifBlank { j.galponCodigo }
+                )
+            }
+            catalogJaulas.isNotEmpty() -> catalogJaulas.map { j ->
+                j.galponCodigo to CatalogChoiceItem(
+                    id = j.codigo,
+                    title = "${j.nombre} (${j.codigo})",
+                    subtitle = "${j.galponNombre.ifBlank { j.galponCodigo }} • ${j.etapaZootecnica.ifBlank { "General" }}",
+                    badge = "${j.ocupacionActual}/${j.capacidadMaxima}",
+                    category = j.galponNombre.ifBlank { j.galponCodigo }
+                )
+            }
+            else -> jaulasDisponibles.map { j ->
+                "" to CatalogChoiceItem(
+                    id = j.codigo,
+                    title = j.codigo,
+                    subtitle = "${j.nombre} • ${j.etapa}",
+                    badge = "${j.ocupacionActual}/${j.capacidadMaxima}",
+                    category = j.etapa.ifBlank { "General" }
+                )
+            }
+        }
+    }
+
+    val lineasOpciones = remember(clinicosCatalog, catalogLineas) {
+        val fromRoom = clinicosCatalog.filter { it.tipoCatalogo == "LINEA_GENETICA" }.map {
+            CatalogChoiceItem(
+                id = it.nombre,
+                title = it.nombre,
+                subtitle = it.subcategoria.ifBlank { "Línea Genética" },
+                badge = it.codigo,
+                category = it.subcategoria.ifBlank { "Genética" }
+            )
+        }
+        when {
+            fromRoom.isNotEmpty() -> fromRoom
+            catalogLineas.isNotEmpty() -> catalogLineas.map { linea ->
+                CatalogChoiceItem(
+                    id = linea,
+                    title = linea,
+                    subtitle = "Línea Genética / Raza registrada",
+                    category = "Genética"
+                )
+            }
+            else -> listOf(
+                "Topigs Norsvin TN70",
+                "PIC Camborough",
+                "Landrace",
+                "Yorkshire",
+                "Duroc",
+                "F1 (Landrace x Yorkshire)"
+            ).map { linea ->
+                CatalogChoiceItem(id = linea, title = linea, subtitle = "Línea Genética estándar", category = "Genética")
+            }
+        }
+    }
+
+    val etapasOpciones = remember(clinicosCatalog) {
+        clinicosCatalog.filter { it.tipoCatalogo == "ETAPA_ZOOTECNICA" }
+            .map { it.nombre }
+            .ifEmpty { listOf("Lactancia", "Precebo", "Crecimiento", "Engorde", "Reemplazo", "Gestación") }
+    }
+
+    val initialGalpon = remember(cerdoActual, allJaulasConGalpon, galponesOpciones, uiPrefs) {
+        val fromJaula = cerdoActual?.jaula?.let { jCode ->
+            allJaulasConGalpon.firstOrNull { it.second.id.equals(jCode, ignoreCase = true) }?.first
+        }.orEmpty()
+        when {
+            fromJaula.isNotBlank() -> fromJaula
+            uiPrefs.galponPredeterminado.isNotBlank() -> uiPrefs.galponPredeterminado
+            else -> galponesOpciones.firstOrNull()?.id ?: ""
+        }
+    }
+
+    var galponSeleccionado by remember { mutableStateOf(initialGalpon) }
+    val jaulasFiltradas = remember(allJaulasConGalpon, galponSeleccionado) {
+        val byGalpon = if (galponSeleccionado.isNotBlank()) {
+            allJaulasConGalpon.filter { it.first.equals(galponSeleccionado, ignoreCase = true) }
+        } else {
+            emptyList()
+        }
+        (if (byGalpon.isNotEmpty()) byGalpon else allJaulasConGalpon).map { it.second }
+    }
+
     var crotal by remember { mutableStateOf(cerdoActual?.crotal ?: "CR-") }
     var rfid by remember { mutableStateOf(cerdoActual?.rfid ?: "") }
     var sexo by remember { mutableStateOf(cerdoActual?.sexo ?: "Hembra") }
-    var raza by remember { mutableStateOf(cerdoActual?.raza ?: "Topigs Norsvin TN70") }
+    var raza by remember { mutableStateOf(cerdoActual?.raza ?: lineasOpciones.firstOrNull()?.id ?: "Topigs Norsvin TN70") }
     var pesoStr by remember { mutableStateOf(cerdoActual?.pesoKg?.toString() ?: "12.0") }
     var diasVidaInput by remember { mutableStateOf(cerdoActual?.diasVida ?: 35) }
-    var jaulaSeleccionada by remember { mutableStateOf(cerdoActual?.jaula ?: jaulasDisponibles.firstOrNull()?.codigo ?: "C-PREC-01") }
+    var jaulaSeleccionada by remember {
+        mutableStateOf(
+            cerdoActual?.jaula
+                ?: jaulasFiltradas.firstOrNull()?.id
+                ?: jaulasDisponibles.firstOrNull()?.codigo
+                ?: "C-PREC-01"
+        )
+    }
+
+    var showGalponSheet by remember { mutableStateOf(false) }
+    var showJaulaSheet by remember { mutableStateOf(false) }
+    var showRazaSheet by remember { mutableStateOf(false) }
 
     val pesoDouble = pesoStr.toDoubleOrNull() ?: 10.0
     val fechaCalculadaLong = remember(diasVidaInput) {
@@ -841,6 +1055,11 @@ private fun CerdoEditDialog(
             pesoKg = pesoDouble
         )
     }
+
+    val selectedGalponItem = galponesOpciones.firstOrNull { it.id.equals(galponSeleccionado, ignoreCase = true) }
+    val selectedJaulaItem = jaulasFiltradas.firstOrNull { it.id.equals(jaulaSeleccionada, ignoreCase = true) }
+        ?: allJaulasConGalpon.firstOrNull { it.second.id.equals(jaulaSeleccionada, ignoreCase = true) }?.second
+    val selectedRazaItem = lineasOpciones.firstOrNull { it.id.equals(raza, ignoreCase = true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -863,7 +1082,8 @@ private fun CerdoEditDialog(
                     OutlinedTextField(
                         value = crotal,
                         onValueChange = { crotal = it.uppercase() },
-                        label = { Text("Crotal / Arete *") },
+                        label = { Text(if (cerdoActual != null) "Crotal / Arete (Bloqueado)" else "Crotal / Arete *") },
+                        enabled = cerdoActual == null,
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -881,12 +1101,86 @@ private fun CerdoEditDialog(
 
                 item {
                     Text("Sexo:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FieldTextPrimary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         listOf("Hembra", "Macho", "Castrado").forEach { s ->
                             FilterChip(
                                 selected = sexo == s,
                                 onClick = { sexo = s },
-                                label = { Text(s, fontSize = 11.sp) }
+                                label = { Text(s, fontSize = 11.sp, maxLines = 1) }
+                            )
+                        }
+                    }
+                }
+
+                if (galponesOpciones.isNotEmpty()) {
+                    item {
+                        DatabaseSelectorField(
+                            label = "Galpón / Nave",
+                            selectedTitle = selectedGalponItem?.title ?: galponSeleccionado,
+                            selectedSubtitle = selectedGalponItem?.subtitle ?: "",
+                            selectedBadge = selectedGalponItem?.badge ?: "",
+                            placeholder = "Seleccionar galpón de la granja...",
+                            leadingIcon = Icons.Default.Warehouse,
+                            compact = true,
+                            onClick = { showGalponSheet = true }
+                        )
+                    }
+                }
+
+                item {
+                    DatabaseSelectorField(
+                        label = "Jaula / Corral Asignado *",
+                        selectedTitle = selectedJaulaItem?.title ?: jaulaSeleccionada,
+                        selectedSubtitle = selectedJaulaItem?.subtitle ?: "",
+                        selectedBadge = selectedJaulaItem?.badge ?: "",
+                        placeholder = "Seleccionar jaula/corral...",
+                        leadingIcon = Icons.Default.GridView,
+                        compact = true,
+                        onClick = { showJaulaSheet = true }
+                    )
+                }
+
+                item {
+                    DatabaseSelectorField(
+                        label = "Línea Genética / Raza *",
+                        selectedTitle = selectedRazaItem?.title ?: raza,
+                        selectedSubtitle = selectedRazaItem?.subtitle ?: "",
+                        selectedBadge = selectedRazaItem?.badge ?: "",
+                        placeholder = "Seleccionar genética...",
+                        leadingIcon = Icons.Default.Biotech,
+                        compact = true,
+                        onClick = { showRazaSheet = true }
+                    )
+                }
+
+                item {
+                    Text("Etapa Zootécnica Sugerida:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FieldTextPrimary)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        etapasOpciones.forEach { etapa ->
+                            val isMatched = previewCerdo.etapaClasificada.contains(etapa.take(5), ignoreCase = true)
+                            FilterChip(
+                                selected = isMatched,
+                                onClick = {
+                                    diasVidaInput = when {
+                                        etapa.contains("Lactan", ignoreCase = true) || etapa.contains("Mater", ignoreCase = true) -> 10
+                                        etapa.contains("Preceb", ignoreCase = true) -> 35
+                                        etapa.contains("Crecim", ignoreCase = true) -> 80
+                                        etapa.contains("Engor", ignoreCase = true) || etapa.contains("Ceba", ignoreCase = true) -> 130
+                                        etapa.contains("Reemp", ignoreCase = true) -> 190
+                                        else -> 260
+                                    }
+                                },
+                                label = { Text(etapa, fontSize = 11.sp, maxLines = 1) }
                             )
                         }
                     }
@@ -925,20 +1219,6 @@ private fun CerdoEditDialog(
                     )
                 }
 
-                item {
-                    // Selector de Jaula
-                    Text("Jaula Asignada:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FieldTextPrimary)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(jaulasDisponibles) { j ->
-                            FilterChip(
-                                selected = jaulaSeleccionada == j.codigo,
-                                onClick = { jaulaSeleccionada = j.codigo },
-                                label = { Text("${j.codigo} (${j.ocupacionActual}/${j.capacidadMaxima})", fontSize = 11.sp) }
-                            )
-                        }
-                    }
-                }
-
                 // TARJETA DE CÁLCULO DINÁMICO EN EL MODAL
                 item {
                     Surface(
@@ -975,7 +1255,7 @@ private fun CerdoEditDialog(
             Button(
                 onClick = {
                     if (crotal.isNotBlank()) {
-                        onConfirm(previewCerdo)
+                        onConfirm(previewCerdo, galponSeleccionado)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = FieldPrimary)
@@ -989,6 +1269,56 @@ private fun CerdoEditDialog(
             }
         }
     )
+
+    if (showGalponSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Galpón",
+            subtitle = "Infraestructura sincronizada desde PostgreSQL",
+            items = galponesOpciones,
+            selectedId = galponSeleccionado,
+            onSelect = { chosen ->
+                galponSeleccionado = chosen.id
+                val matchingJaula = allJaulasConGalpon.firstOrNull { it.first.equals(chosen.id, ignoreCase = true) }?.second
+                if (matchingJaula != null) {
+                    jaulaSeleccionada = matchingJaula.id
+                }
+                showGalponSheet = false
+            },
+            onDismiss = { showGalponSheet = false }
+        )
+    }
+
+    if (showJaulaSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Jaula / Corral",
+            subtitle = if (galponSeleccionado.isNotBlank()) "Galpón $galponSeleccionado" else "Todos los corrales activos",
+            items = jaulasFiltradas,
+            selectedId = jaulaSeleccionada,
+            onSelect = { chosen ->
+                jaulaSeleccionada = chosen.id
+                val resolvedGalpon = allJaulasConGalpon.firstOrNull { it.second.id.equals(chosen.id, ignoreCase = true) }?.first
+                if (!resolvedGalpon.isNullOrBlank()) {
+                    galponSeleccionado = resolvedGalpon
+                }
+                showJaulaSheet = false
+            },
+            onDismiss = { showJaulaSheet = false }
+        )
+    }
+
+    if (showRazaSheet) {
+        SearchableCatalogBottomSheet(
+            title = "Seleccionar Línea Genética / Raza",
+            subtitle = "Catálogo genético de granja",
+            items = lineasOpciones,
+            selectedId = raza,
+            onSelect = { chosen ->
+                raza = chosen.id
+                showRazaSheet = false
+            },
+            onDismiss = { showRazaSheet = false }
+        )
+    }
 }
 
 // Modal de Ficha Técnica Completa

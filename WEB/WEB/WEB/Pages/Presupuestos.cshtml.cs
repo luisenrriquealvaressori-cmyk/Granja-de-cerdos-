@@ -17,6 +17,7 @@ public class PresupuestosModel : PageModel
     }
 
     public PresupuestosViewModel Data { get; set; } = new();
+    public CatalogosFormularioWebViewModel Catalogos { get; set; } = new();
 
     [BindProperty(SupportsGet = true)]
     public string? LoteFiltro { get; set; }
@@ -38,6 +39,7 @@ public class PresupuestosModel : PageModel
         }
 
         Data = await _dataService.GetPresupuestosDataAsync(LoteFiltro);
+        Catalogos = await _dataService.GetCatalogosFormularioWebAsync();
         return Page();
     }
 

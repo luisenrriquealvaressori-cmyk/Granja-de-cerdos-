@@ -1,5 +1,6 @@
 package com.example.porciapp.data.net
 
+import android.util.Log
 import com.example.porciapp.data.auth.Session
 import com.example.porciapp.data.auth.SessionManager
 import com.example.porciapp.data.model.UserRole
@@ -37,13 +38,22 @@ class ApiClient(private val sessions: SessionManager) {
             is ApiResult.Fail -> r
             is ApiResult.Ok -> {
                 val json = r.value
-                val user = json.getAsJsonObject("user")
+                val token = json.str("token")
+                val userElement = json.get("user")
+                if (token.isBlank() || userElement == null || !userElement.isJsonObject) {
+                    Log.w(TAG, "Respuesta de login incompleta: falta token u objeto user.")
+                    return ApiResult.Fail(
+                        ApiResult.Kind.SERVER,
+                        "Respuesta de autenticación incompleta del servidor."
+                    )
+                }
+                val user = userElement.asJsonObject
                 val rolServidor = user.str("rol")
                 if (UserRole.fromServer(rolServidor) == null) {
                     return ApiResult.Fail(ApiResult.Kind.FORBIDDEN, "Tu cuenta tiene un rol que la app móvil no admite.")
                 }
                 val session = Session(
-                    token = json.str("token"),
+                    token = token,
                     expiresAtMillis = parseExpiry(json.str("expiresAt")),
                     userId = user.str("id"),
                     nombre = user.str("nombre"),
@@ -87,6 +97,9 @@ class ApiClient(private val sessions: SessionManager) {
         is ApiResult.Ok -> ApiResult.Ok(r.value.body)
     }
 
+    suspend fun saveUiPreferences(body: JsonObject): ApiResult<JsonObject> =
+        call("PUT", "/api/v1/movil/preferencias-ui", body, authenticated = true)
+
     suspend fun postSyncBatch(batch: JsonObject): ApiResult<JsonObject> =
         call("POST", "/api/v1/sync/batch", batch, authenticated = true)
 
@@ -97,7 +110,8 @@ class ApiClient(private val sessions: SessionManager) {
             is ApiResult.Fail -> r
             is ApiResult.Ok -> try {
                 ApiResult.Ok(JsonParser.parseString(r.value.body).asJsonObject)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "JSON inválido recibido de $method $path: ${e.message}")
                 ApiResult.Fail(ApiResult.Kind.SERVER, "El servidor respondió con un formato inesperado.")
             }
         }
@@ -109,31 +123,66 @@ class ApiClient(private val sessions: SessionManager) {
             if (authenticated && token == null) {
                 return@withContext ApiResult.Fail(ApiResult.Kind.UNAUTHORIZED, "La sesión terminó. Inicia sesión de nuevo.")
             }
-            val connection = try {
-                URL(base + path).openConnection() as HttpURLConnection
-            } catch (e: Exception) {
-                return@withContext ApiResult.Fail(ApiResult.Kind.NETWORK, "La dirección del servidor no es válida.")
-            }
-            try {
-                connection.requestMethod = method
-                connection.connectTimeout = 8_000
-                connection.readTimeout = 25_000
-                connection.setRequestProperty("Accept", "application/json")
-                if (token != null) connection.setRequestProperty("Authorization", "Bearer $token")
-                if (body != null) {
-                    connection.doOutput = true
-                    connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            var currentUrlStr = base + path
+            var redirects = 0
+            while (true) {
+                val currentUrl = try {
+                    URL(currentUrlStr)
+                } catch (e: Exception) {
+                    Log.w(TAG, "URL inválida para $method $path: $currentUrlStr (${e.message})")
+                    return@withContext ApiResult.Fail(ApiResult.Kind.NETWORK, "La dirección del servidor no es válida.")
                 }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                if (code in 200..299) ApiResult.Ok(Raw(code, text)) else mapError(code, text)
-            } catch (e: IOException) {
-                ApiResult.Fail(ApiResult.Kind.NETWORK, "No hay conexión con el servidor ($base).")
-            } finally {
-                connection.disconnect()
+                val connection = try {
+                    currentUrl.openConnection() as HttpURLConnection
+                } catch (e: Exception) {
+                    Log.w(TAG, "No se pudo abrir conexión a $currentUrlStr: ${e.message}")
+                    return@withContext ApiResult.Fail(ApiResult.Kind.NETWORK, "La dirección del servidor no es válida.")
+                }
+                try {
+                    val isHttps = currentUrlStr.startsWith("https://", ignoreCase = true)
+                    connection.instanceFollowRedirects = false
+                    connection.requestMethod = method
+                    connection.connectTimeout = if (isHttps) 25_000 else 10_000
+                    connection.readTimeout = if (isHttps) 60_000 else 25_000
+                    connection.setRequestProperty("Accept", "application/json")
+                    if (token != null) connection.setRequestProperty("Authorization", "Bearer $token")
+                    if (body != null) {
+                        connection.doOutput = true
+                        connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                        connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    }
+                    val code = connection.responseCode
+                    if (code in REDIRECT_CODES && redirects < MAX_REDIRECTS) {
+                        val location = connection.getHeaderField("Location")?.trim()
+                        if (!location.isNullOrEmpty()) {
+                            val resolved = try {
+                                URL(currentUrl, location).toString()
+                            } catch (_: Exception) {
+                                location
+                            }
+                            Log.i(TAG, "Redirección HTTP $code en $method $path -> $resolved")
+                            currentUrlStr = resolved
+                            redirects++
+                            continue
+                        }
+                    }
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    if (code in 200..299) {
+                        return@withContext ApiResult.Ok(Raw(code, text))
+                    } else {
+                        Log.w(TAG, "HTTP $code en $method $path ($currentUrlStr): ${text.take(200)}")
+                        return@withContext mapError(code, text)
+                    }
+                } catch (e: IOException) {
+                    Log.w(TAG, "Error de red en $method $path ($currentUrlStr): ${e.javaClass.simpleName}: ${e.message}")
+                    return@withContext ApiResult.Fail(ApiResult.Kind.NETWORK, "No hay conexión con el servidor ($base).")
+                } finally {
+                    connection.disconnect()
+                }
             }
+            @Suppress("UNREACHABLE_CODE")
+            ApiResult.Fail(ApiResult.Kind.NETWORK, "No hay conexión con el servidor ($base).")
         }
 
     private fun mapError(code: Int, text: String): ApiResult.Fail {
@@ -150,7 +199,10 @@ class ApiClient(private val sessions: SessionManager) {
                 message.ifBlank { "Demasiados intentos. Espera unos minutos." },
                 json?.get("retryAfterSeconds")?.takeIf { !it.isJsonNull }?.asInt
             )
-            else -> ApiResult.Fail(ApiResult.Kind.SERVER, "El servidor no pudo procesar la solicitud (código $code).")
+            else -> ApiResult.Fail(
+                ApiResult.Kind.SERVER,
+                message.ifBlank { "El servidor no pudo procesar la solicitud (código $code)." }
+            )
         }
     }
 
@@ -161,5 +213,11 @@ class ApiClient(private val sessions: SessionManager) {
         Instant.parse(raw).toEpochMilli()
     } catch (_: Exception) {
         System.currentTimeMillis() + 12 * 60 * 60 * 1000L
+    }
+
+    companion object {
+        private const val TAG = "ApiClient"
+        private const val MAX_REDIRECTS = 2
+        private val REDIRECT_CODES = setOf(301, 302, 307, 308)
     }
 }

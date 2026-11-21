@@ -1,5 +1,9 @@
+using Microsoft.Extensions.Caching.Memory;
 using Npgsql;
 using System.Data;
+using System.Security.Claims;
+using System.Text.Json;
+using WEB.Security;
 
 namespace WEB.Services;
 
@@ -8,18 +12,46 @@ public class AgroPigDataService
     private readonly IConfiguration _configuration;
     private readonly ILogger<AgroPigDataService> _logger;
     private readonly IHttpContextAccessor _http;
+    private readonly IMemoryCache _cache;
 
     // La estructura base solo se verifica una vez por proceso (antes se ejecutaba en cada petición)
     private static volatile bool _baseEntitiesListas;
     private static readonly SemaphoreSlim _baseLock = new(1, 1);
+    private static long _cacheVersion = 1;
 
-    public AgroPigDataService(IConfiguration configuration, ILogger<AgroPigDataService> logger, IHttpContextAccessor httpContextAccessor)
+    public AgroPigDataService(
+        IConfiguration configuration,
+        ILogger<AgroPigDataService> logger,
+        IHttpContextAccessor httpContextAccessor,
+        IMemoryCache cache)
     {
         // Sin credenciales por defecto en código: configure ConnectionStrings:PostgreSQL o DATABASE_URL en user-secrets/variables de entorno
         _configuration = configuration;
         _logger = logger;
         _http = httpContextAccessor;
+        _cache = cache;
     }
+
+    public static void InvalidarCachesOperativos()
+    {
+        Interlocked.Increment(ref _cacheVersion);
+    }
+
+    private string CacheKey(string prefix, params object?[] parts)
+    {
+        var ver = Volatile.Read(ref _cacheVersion);
+        return parts.Length == 0
+            ? $"agropig:v{ver}:{prefix}"
+            : $"agropig:v{ver}:{prefix}:{string.Join("|", parts.Select(p => p?.ToString() ?? ""))}";
+    }
+
+    private string ResolveRole(string? rolRaw)
+        => AppRoles.Normalizar(rolRaw ?? _http.HttpContext?.User?.FindFirstValue(ClaimTypes.Role)) ?? AppRoles.Operario;
+
+    private string ResolveUserName(string? nombreUsuario)
+        => !string.IsNullOrWhiteSpace(nombreUsuario)
+            ? nombreUsuario.Trim()
+            : (_http.HttpContext?.User?.FindFirstValue(ClaimTypes.Name)?.Trim() ?? "");
 
     private string _connectionString => WEB.Security.PostgresConnectionResolver.Resolve(_configuration);
 
@@ -89,9 +121,10 @@ public class AgroPigDataService
                     ('MP', 'Materias Primas / Granos', 'Maíz, torta de soya, harina de pescado'),
                     ('PRE', 'Preiniciadores & Aditivos', 'Preiniciadores de alta digestibilidad y acidificantes'),
                     ('MED', 'Medicamentos & Vacunas', 'Biológicos, antibióticos, antiparasitarios'),
-                    ('BIO', 'Desinfectantes & Bioseguridad', 'Detergentes, cal viva, amonios cuaternarios')
+                    ('BIO', 'Desinfectantes & Bioseguridad', 'Detergentes, cal viva, amonios cuaternarios'),
+                    ('KIT', 'Instrumental & Kit Clínico', 'Jeringas descartables, agujas hipodérmicas, antisépticos tópicos, torundas y guantes')
                 ON CONFLICT (codigo) DO UPDATE 
-                SET nombre = EXCLUDED.nombre;";
+                SET nombre = EXCLUDED.nombre, descripcion = EXCLUDED.descripcion;";
             await using (var cmd = new NpgsqlCommand(sqlCategorias, conn))
             {
                 await cmd.ExecuteNonQueryAsync();
@@ -186,7 +219,8 @@ public class AgroPigDataService
                     ADD COLUMN IF NOT EXISTS monto_estimado_usd NUMERIC(12,2) DEFAULT 0,
                     ADD COLUMN IF NOT EXISTS monto_ejecutado_usd NUMERIC(12,2) DEFAULT 0,
                     ADD COLUMN IF NOT EXISTS porcentaje_desviacion NUMERIC(5,2) DEFAULT 0,
-                    ADD COLUMN IF NOT EXISTS estado_bi VARCHAR(40) DEFAULT 'optimo';
+                    ADD COLUMN IF NOT EXISTS estado_bi VARCHAR(40) DEFAULT 'optimo',
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
                 ALTER TABLE presupuestos_lote ALTER COLUMN monto_presupuestado_usd DROP NOT NULL;";
             await using (var cmdGCols = new NpgsqlCommand(sqlGastosCols, conn))
@@ -291,32 +325,7 @@ public class AgroPigDataService
                 Console.WriteLine($"[AgroPig] Error actualizando v_radar_partos_inminentes: {ex.Message}");
             }
 
-            // 5. Asegurar Insumos Médicos y Kit Descartable en Catálogo Central
-            string sqlInsumosClinicos = @"
-                INSERT INTO insumos_catalogo (
-                    granja_id, categoria_id, codigo_sku, nombre, unidad_medida, stock_actual, stock_minimo_seguridad, costo_unitario_promedio_usd, activo
-                )
-                SELECT 
-                    @granja, c.id, d.sku, d.nombre, d.unidad, d.stock, d.stock_min, d.costo, true
-                FROM (VALUES
-                    ('MED-HIE-100', 'Hierro Dextrano Frasco 100ml', 'ml', 1000.0, 100.0, 0.0800),
-                    ('MED-OXI-100', 'Oxitetraciclina L.A. 200 Frasco 100ml', 'ml', 800.0, 100.0, 0.1200),
-                    ('MED-FLU-100', 'Flunixin Meglumine 5% Frasco 100ml', 'ml', 600.0, 80.0, 0.1500),
-                    ('MED-AMO-100', 'Amoxicilina Trihidrato L.A. 100ml', 'ml', 500.0, 50.0, 0.1100),
-                    ('MED-JER-05ML', 'Jeringa Descartable 5 ml con Émbolo Luer', 'ud', 450.0, 50.0, 0.1200),
-                    ('MED-AGU-16G', 'Aguja Hipodérmica Veterinaria 16G x 1.5 Pulgada', 'ud', 900.0, 100.0, 0.0600),
-                    ('MED-YOD-10', 'Solución Yodo Povidona 10% Antiséptico Tópico', 'ml', 2500.0, 200.0, 0.0150),
-                    ('MED-TOR-ALG', 'Torunda de Algodón Antiséptico / Gasa Estéril', 'ud', 850.0, 100.0, 0.0300)
-                ) AS d(sku, nombre, unidad, stock, stock_min, costo)
-                CROSS JOIN (SELECT id FROM categorias_insumos WHERE codigo = 'MED' LIMIT 1) c
-                ON CONFLICT (codigo_sku) DO UPDATE
-                SET costo_unitario_promedio_usd = EXCLUDED.costo_unitario_promedio_usd,
-                    unidad_medida = EXCLUDED.unidad_medida;";
-            await using (var cmdInsumos = new NpgsqlCommand(sqlInsumosClinicos, conn))
-            {
-                cmdInsumos.Parameters.AddWithValue("granja", granjaId);
-                await cmdInsumos.ExecuteNonQueryAsync();
-            }
+            // 5. El catálogo de insumos y alimentos lo crea y administra el usuario desde cero (sin auto-siembra demo)
 
             // 6. Tabla de registro_tratamientos_clinicos (sin siembra de datos ficticios)
 
@@ -461,10 +470,10 @@ public class AgroPigDataService
             }
             catch { /* Resiliente */ }
 
-            // 11. Asegurar los 4 Usuarios Oficiales del Sistema (admin, luis, junior, jorgejr)
+            // 11. Asegurar esquema de Usuarios y crear únicamente cuenta inicial admin si no existe ningún administrador
             try
             {
-                string sqlCuatroUsuarios = @"
+                string sqlAdminInicial = @"
                     ALTER TABLE usuarios_operadores ADD COLUMN IF NOT EXISTS nombre_usuario VARCHAR(60);
                     ALTER TABLE usuarios_operadores ADD COLUMN IF NOT EXISTS matricula_profesional VARCHAR(60);
                     ALTER TABLE usuarios_operadores ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);
@@ -472,36 +481,15 @@ public class AgroPigDataService
                     ALTER TABLE usuarios_operadores ADD COLUMN IF NOT EXISTS ultimo_login TIMESTAMPTZ;
                     ALTER TABLE usuarios_operadores ALTER COLUMN email DROP NOT NULL;
 
-                    -- 1. admin: Administrador General
                     INSERT INTO usuarios_operadores (id, granja_id, nombre_usuario, nombre, password_hash, rol, activo, debe_cambiar_password)
-                    VALUES ('d0000000-0000-0000-0000-0000000000a1', @granja, 'admin', 'Luis (Administrador General)', crypt('Prueba#2026', gen_salt('bf', 10)), 'administrador_financiero', TRUE, FALSE)
-                    ON CONFLICT (id) DO UPDATE SET nombre_usuario = 'admin', nombre = EXCLUDED.nombre, rol = 'administrador_financiero', activo = TRUE;
-
-                    -- 2. luis: Administrador Directivo
-                    INSERT INTO usuarios_operadores (id, granja_id, nombre_usuario, nombre, password_hash, rol, activo, debe_cambiar_password)
-                    VALUES ('d0000000-0000-0000-0000-0000000000a4', @granja, 'luis', 'Luis Admin', crypt('Prueba#2026', gen_salt('bf', 10)), 'administrador_financiero', TRUE, FALSE)
-                    ON CONFLICT (id) DO UPDATE SET nombre_usuario = 'luis', nombre = EXCLUDED.nombre, rol = 'administrador_financiero', activo = TRUE;
-
-                    -- 3. junior: Veterinario (MVZ)
-                    INSERT INTO usuarios_operadores (id, granja_id, nombre_usuario, nombre, password_hash, rol, matricula_profesional, activo, debe_cambiar_password)
-                    VALUES ('d0000000-0000-0000-0000-0000000000a2', @granja, 'junior', 'Junior MVZ', crypt('Prueba#2026', gen_salt('bf', 10)), 'director_veterinario', 'MVZ-8412', TRUE, FALSE)
-                    ON CONFLICT (id) DO UPDATE SET nombre_usuario = 'junior', nombre = EXCLUDED.nombre, rol = 'director_veterinario', matricula_profesional = 'MVZ-8412', activo = TRUE;
-
-                    -- 4. jorgejr: Operario de Campo
-                    INSERT INTO usuarios_operadores (id, granja_id, nombre_usuario, nombre, password_hash, rol, activo, debe_cambiar_password)
-                    VALUES ('d0000000-0000-0000-0000-0000000000a3', @granja, 'jorgejr', 'Jorge Jr. (Operario de Campo)', crypt('Prueba#2026', gen_salt('bf', 10)), 'operario_galpon', TRUE, FALSE)
-                    ON CONFLICT (id) DO UPDATE SET nombre_usuario = 'jorgejr', nombre = EXCLUDED.nombre, rol = 'operario_galpon', activo = TRUE;
-
-                    -- Alias compatibles para evitar interrupciones
-                    INSERT INTO usuarios_operadores (id, granja_id, nombre_usuario, nombre, password_hash, rol, matricula_profesional, activo, debe_cambiar_password)
-                    VALUES ('d0000000-0000-0000-0000-0000000000a5', @granja, 'vet', 'Veterinario Plantel', crypt('Prueba#2026', gen_salt('bf', 10)), 'director_veterinario', 'MVZ-0001', TRUE, FALSE)
-                    ON CONFLICT (id) DO NOTHING;
-
-                    INSERT INTO usuarios_operadores (id, granja_id, nombre_usuario, nombre, password_hash, rol, activo, debe_cambiar_password)
-                    VALUES ('d0000000-0000-0000-0000-0000000000a6', @granja, 'operario', 'Operario Turno', crypt('Prueba#2026', gen_salt('bf', 10)), 'operario_galpon', TRUE, FALSE)
+                    SELECT 'd0000000-0000-0000-0000-0000000000a1', @granja, 'admin', 'Luis (Administrador General)', crypt('Prueba#2026', gen_salt('bf', 10)), 'administrador_financiero', TRUE, FALSE
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM usuarios_operadores
+                        WHERE lower(nombre_usuario) = 'admin' OR rol = 'administrador_financiero'
+                    )
                     ON CONFLICT (id) DO NOTHING;";
 
-                await using var cmdUsers = new NpgsqlCommand(sqlCuatroUsuarios, conn);
+                await using var cmdUsers = new NpgsqlCommand(sqlAdminInicial, conn);
                 cmdUsers.Parameters.AddWithValue("granja", granjaId);
                 await cmdUsers.ExecuteNonQueryAsync();
             }
@@ -598,34 +586,6 @@ public class AgroPigDataService
 
                 await using var cmdCompras = new NpgsqlCommand(sqlCompras, conn);
                 await cmdCompras.ExecuteNonQueryAsync();
-
-                // Sembrar Proveedores iniciales si no existen
-                string sqlSeedProveedores = @"
-                    INSERT INTO proveedores (id, granja_id, codigo, nombre_comercial, razon_social, ruc, contacto_nombre, telefono, email, direccion, condiciones_pago, activo)
-                    VALUES
-                        ('b0000000-0000-0000-0000-000000000001', @granja, 'PRV-CARGILL', 'Cargill Nutrición Porcina', 'Cargill de Nicaragua S.A.', 'J0310000123456', 'Ing. Roberto Mendoza', '+505 8899-1122', 'ventas@cargillporcino.com', 'Km 11.5 Carretera Norte, Managua', 'Crédito 15 días', true),
-                        ('b0000000-0000-0000-0000-000000000002', @granja, 'PRV-SANIDAD', 'Laboratorios Veterinarios San Jerónimo', 'San Jerónimo Biofarma S.A.', 'J0310000789012', 'Dra. Claudia Rivas', '+505 8455-3344', 'pedidos@sanjeronimovet.com', 'Carretera a Masaya Km 8', 'Contado', true),
-                        ('b0000000-0000-0000-0000-000000000003', @granja, 'PRV-EQUIPOS', 'AgroEquipos & Galpones de Nicaragua', 'AgroEquipos S.A.', 'J0310000345678', 'Lic. Manuel Fonseca', '+505 8622-7788', 'contacto@agroequipos.ni', 'Pista Juan Pablo II, Managua', 'Crédito 30 días', true)
-                    ON CONFLICT (codigo) DO UPDATE 
-                    SET nombre_comercial = EXCLUDED.nombre_comercial, telefono = EXCLUDED.telefono, activo = true;
-
-                    -- Sembrar Productos del Catálogo con Reglas de Descuento
-                    INSERT INTO catalogo_proveedores_productos (
-                        id, proveedor_id, codigo_producto, nombre_producto, unidad_medida, 
-                        precio_unitario_usd, precio_unitario_nio, aplica_descuento, unidades_minimas_descuento, 
-                        tipo_descuento, descuento_porcentaje, descuento_monetario_usd, descuento_monetario_nio, notas_promocion, activo
-                    ) VALUES
-                        ('c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'ALIM-ENG-01', 'Alimento Engorde Concentrado Pellet 16% PB', 'qq (100 lbs)', 32.50, 1196.00, true, 20, 'porcentaje', 8.0, 0, 0, '8% de descuento por compra de 20 quintales o más', true),
-                        ('c0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 'ALIM-PREC-01', 'Preiniciador Fase 1 Micro-pellet Lechones', 'qq (100 lbs)', 48.00, 1766.40, true, 10, 'monetario', 0, 3.50, 128.80, 'Descuento de $3.50 USD (C$ 128.80) por saco a partir de 10 sacos', true),
-                        ('c0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000001', 'ALIM-GEST-01', 'Alimento Gestación Multigrano Fibra Activa', 'qq (100 lbs)', 29.80, 1096.64, true, 25, 'porcentaje', 10.0, 0, 0, '10% de descuento por tarima completa (25 quintales)', true),
-                        ('c0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000002', 'MED-HIE-100', 'Hierro Dextrano 200 mg/ml Frasco 100ml', 'frasco 100ml', 8.00, 294.40, true, 5, 'porcentaje', 5.0, 0, 0, '5% dto al llevar paquete de 5 o más frascos', true),
-                        ('c0000000-0000-0000-0000-000000000005', 'b0000000-0000-0000-0000-000000000002', 'MED-OXI-100', 'Oxitetraciclina L.A. 200 Frasco 100ml', 'frasco 100ml', 12.00, 441.60, true, 10, 'monetario', 0, 1.50, 55.20, 'Rebaja de $1.50 USD (C$ 55.20) por frasco comprando 10 unidades', true),
-                        ('c0000000-0000-0000-0000-000000000006', 'b0000000-0000-0000-0000-000000000002', 'MED-JER-05', 'Jeringa Veterinaria Descartable 5ml Caja 100 uds', 'caja 100 uds', 12.50, 460.00, true, 3, 'porcentaje', 10.0, 0, 0, '10% de descuento a partir de 3 cajas', true)
-                    ON CONFLICT (id) DO NOTHING;";
-
-                await using var cmdSeedP = new NpgsqlCommand(sqlSeedProveedores, conn);
-                cmdSeedP.Parameters.AddWithValue("granja", granjaId);
-                await cmdSeedP.ExecuteNonQueryAsync();
             }
             catch { /* Resiliente */ }
 
@@ -647,7 +607,7 @@ public class AgroPigDataService
                         capacidad_lechones = 20, capacidad_adultos = 6
                     WHERE largo_fondo_metros IS NULL OR largo_fondo_metros = 0;
 
-                    -- Asegurar 6 Jaulas en Galpón de Engorde Nave 1
+                    -- Asegurar 6 Jaulas en Galpón de Maternidad y reparar vínculos huérfanos
                     DO $$
                     DECLARE
                         v_galpon_id UUID;
@@ -656,17 +616,218 @@ public class AgroPigDataService
                         IF v_galpon_id IS NOT NULL THEN
                             FOR i IN 1..6 LOOP
                                 INSERT INTO jaulas_corrales (granja_id, galpon_id, codigo, nombre, etapa_zootecnica, capacidad_maxima, capacidad_lechones, capacidad_adultos, largo_fondo_metros, ancho_metros, area_m2, numero_jaula, tipo_instalacion)
-                                VALUES ('a0000000-0000-0000-0000-000000000001', v_galpon_id, 'G1-J' || lpad(i::text, 2, '0'), 'Galpón 1 - Jaula ' || i, 'Engorde Intensivo', 20, 20, 6, 5.0, 3.0, 15.0, i, 'Jaula técnica 5x3m con comedero inox seco-húmedo')
+                                VALUES ('a0000000-0000-0000-0000-000000000001', v_galpon_id, 'G1-J' || lpad(i::text, 2, '0'), 'Galpón 1 - Jaula ' || i, 'Maternidad', 20, 20, 6, 5.0, 3.0, 15.0, i, 'Jaula técnica 5x3m con comedero inox seco-húmedo')
                                 ON CONFLICT (codigo) DO UPDATE 
-                                SET largo_fondo_metros = 5.0, ancho_metros = 3.0, area_m2 = 15.0, capacidad_lechones = 20, capacidad_adultos = 6, numero_jaula = i;
+                                SET etapa_zootecnica = 'Maternidad', largo_fondo_metros = 5.0, ancho_metros = 3.0, area_m2 = 15.0, capacidad_lechones = 20, capacidad_adultos = 6, numero_jaula = i;
                             END LOOP;
                         END IF;
-                    END $$;";
+                    END $$;
+
+                    UPDATE jaulas_corrales j
+                    SET galpon_id = CASE
+                        WHEN j.codigo LIKE 'J-MAT-%' OR j.codigo LIKE 'G1-J%' THEN (SELECT id FROM galpones_naves WHERE codigo = 'GALP-01' LIMIT 1)
+                        WHEN j.codigo LIKE '%GEST%'                          THEN (SELECT id FROM galpones_naves WHERE codigo = 'GALP-02' LIMIT 1)
+                        WHEN j.codigo LIKE 'C-PREC-%'                        THEN (SELECT id FROM galpones_naves WHERE codigo = 'GALP-03' LIMIT 1)
+                        ELSE (SELECT id FROM galpones_naves WHERE codigo = 'GALP-04' LIMIT 1)
+                    END
+                    WHERE j.galpon_id IS NULL;";
 
                 await using var cmdJM = new NpgsqlCommand(sqlJaulasMedidas, conn);
                 await cmdJM.ExecuteNonQueryAsync();
             }
             catch { /* Resiliente */ }
+
+            // 14. Catálogos Maestros Operativos (Labores, Horarios/Turnos, Clínico y Preferencias UI por Rol)
+            try
+            {
+                string sqlCatalogosMaestros = @"
+                    CREATE TABLE IF NOT EXISTS catalogo_labores_campo (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        granja_id UUID NOT NULL REFERENCES granjas(id) ON DELETE CASCADE,
+                        codigo VARCHAR(40) NOT NULL UNIQUE,
+                        nombre VARCHAR(120) NOT NULL,
+                        tipo_registro VARCHAR(30) NOT NULL,
+                        categoria VARCHAR(50) NOT NULL,
+                        etapa_sugerida VARCHAR(60),
+                        galpon_sugerido VARCHAR(30),
+                        duracion_sugerida VARCHAR(40),
+                        tarifa_referencia_nio NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        centro_costo_codigo VARCHAR(20),
+                        rol_sugerido VARCHAR(40),
+                        requiere_insumo BOOLEAN NOT NULL DEFAULT FALSE,
+                        activo BOOLEAN NOT NULL DEFAULT TRUE,
+                        orden INT NOT NULL DEFAULT 100,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+
+                    CREATE TABLE IF NOT EXISTS catalogo_horarios_turnos (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        granja_id UUID NOT NULL REFERENCES granjas(id) ON DELETE CASCADE,
+                        codigo VARCHAR(40) NOT NULL UNIQUE,
+                        nombre VARCHAR(120) NOT NULL,
+                        tipo_horario VARCHAR(30) NOT NULL,
+                        hora_inicio VARCHAR(10) NOT NULL,
+                        hora_fin VARCHAR(10),
+                        categoria_actividad VARCHAR(40),
+                        etapa_aplicable VARCHAR(60),
+                        rol_responsable VARCHAR(40),
+                        prioridad_default VARCHAR(20) NOT NULL DEFAULT 'Media',
+                        descripcion VARCHAR(250),
+                        activo BOOLEAN NOT NULL DEFAULT TRUE,
+                        orden INT NOT NULL DEFAULT 100
+                    );
+
+                    CREATE TABLE IF NOT EXISTS catalogo_clinico_sanitario (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        granja_id UUID NOT NULL REFERENCES granjas(id) ON DELETE CASCADE,
+                        codigo VARCHAR(40) NOT NULL UNIQUE,
+                        tipo_catalogo VARCHAR(35) NOT NULL,
+                        nombre VARCHAR(120) NOT NULL,
+                        subcategoria VARCHAR(60),
+                        dias_retiro_referencia INT NOT NULL DEFAULT 0,
+                        activo BOOLEAN NOT NULL DEFAULT TRUE,
+                        orden INT NOT NULL DEFAULT 100
+                    );
+
+                    CREATE TABLE IF NOT EXISTS preferencias_ui_usuario (
+                        usuario_id UUID PRIMARY KEY REFERENCES usuarios_operadores(id) ON DELETE CASCADE,
+                        rol_base VARCHAR(40) NOT NULL,
+                        modulos_visibles_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        acciones_rapidas_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        nav_inferior_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        galpon_predeterminado VARCHAR(30),
+                        turno_predeterminado VARCHAR(40),
+                        moneda_preferida VARCHAR(10) NOT NULL DEFAULT 'NIO',
+                        modo_compacto BOOLEAN NOT NULL DEFAULT FALSE,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+
+                    INSERT INTO catalogo_labores_campo (granja_id, codigo, nombre, tipo_registro, categoria, etapa_sugerida, galpon_sugerido, duracion_sugerida, tarifa_referencia_nio, centro_costo_codigo, rol_sugerido, requiere_insumo, orden)
+                    SELECT @granja, d.codigo, d.nombre, d.tipo_registro, d.categoria, d.etapa_sugerida, d.galpon_sugerido, d.duracion_sugerida, d.tarifa_nio, d.cc_codigo, d.rol_sugerido, d.req_insumo, d.orden
+                    FROM (VALUES
+                        ('LAB-LIMP-GALP',   'Limpieza y lavado a presión de corrales',        'LABOR_CAMPO',     'Bioseguridad',     'Todas',       'GALP-04', 'Medio día (4h)',   160.00, 'CC-NOM',  'Operario',    FALSE, 10),
+                        ('LAB-DESINF-PED',  'Desinfección, calado y recarga de pediluvios',   'LABOR_CAMPO',     'Bioseguridad',     'Todas',       'GALP-01', '2 horas (0.25j)',  80.00,  'CC-SAN',  'Operario',    TRUE,  20),
+                        ('LAB-ALIM-MAN',    'Distribución y calibración de tolvas de comida', 'LABOR_CAMPO',     'Alimentación',     'Precebo',     'GALP-03', '2 horas (0.25j)',  80.00,  'CC-ALIM', 'Operario',    FALSE, 30),
+                        ('LAB-PESAJE-LOT',  'Pesaje muestral y control GMD de lote',          'LABOR_CAMPO',     'Manejo',           'Crecimiento', 'GALP-04', 'Medio día (4h)',   160.00, 'CC-NOM',  'Operario',    FALSE, 40),
+                        ('LAB-ASIST-PARTO', 'Vigilancia de partos y secado de lechones',      'LABOR_CAMPO',     'Maternidad',       'Maternidad',  'GALP-01', 'Jornal completo',  320.00, 'CC-NOM',  'Veterinario', FALSE, 50),
+                        ('LAB-DETEC-CELO',  'Detección de celo y recela con verraco',         'LABOR_CAMPO',     'Reproducción',     'Gestación',   'GALP-02', '2 horas (0.25j)',  80.00,  'CC-NOM',  'Veterinario', FALSE, 60),
+                        ('LAB-VAC-LOTE',    'Jornada de vacunación y desparasitación grupal', 'LABOR_CAMPO',     'Sanidad',          'Precebo',     'GALP-03', 'Medio día (4h)',   160.00, 'CC-SAN',  'Veterinario', TRUE,  70),
+                        ('LAB-MANEJO-LECH', 'Descolmillado, corte de cola y muesqueo',        'LABOR_CAMPO',     'Maternidad',       'Maternidad',  'GALP-01', '2 horas (0.25j)',  80.00,  'CC-NOM',  'Veterinario', TRUE,  80),
+                        ('LAB-MANT-HIDR',   'Revisión de chupones, bebederos y cortinas',     'LABOR_CAMPO',     'Mantenimiento',    'Todas',       'GALP-04', '2 horas (0.25j)',  80.00,  'CC-MANT', 'Operario',    FALSE, 90),
+                        ('LAB-MOV-CORRAL',  'Traslado y reagrupación de cerdos entre corrales','LABOR_CAMPO',    'Manejo',           'Crecimiento', 'GALP-03', 'Medio día (4h)',   160.00, 'CC-NOM',  'Operario',    FALSE, 100),
+                        ('GAS-JORNAL-EXT',  'Pago de jornal temporal adicional de campo',      'GASTO_OPERATIVO', 'Mano de Obra',     'Todas',       'GALP-04', 'Jornal completo',  320.00, 'CC-NOM',  'Administrador', FALSE, 110),
+                        ('GAS-CAL-DESINF',  'Compra local de cal viva, cloro o jabón yodado', 'GASTO_OPERATIVO', 'Sanidad/Limpieza', 'Todas',       'GALP-01', NULL,               450.00, 'CC-SAN',  'Administrador', FALSE, 120),
+                        ('GAS-REP-CHUPETE', 'Repuestos menores: chupones inox, manguera, llaves','GASTO_OPERATIVO','Mantenimiento',   'Todas',       'GALP-03', NULL,               380.00, 'CC-MANT', 'Administrador', FALSE, 130),
+                        ('GAS-BOMB-TERM',   'Bombillos infrarrojos / calefacción maternidad', 'GASTO_OPERATIVO', 'Mantenimiento',    'Maternidad',  'GALP-01', NULL,               550.00, 'CC-MANT', 'Administrador', FALSE, 140),
+                        ('GAS-COMBUST-GEN', 'Combustible motobomba lavado y planta eléctrica','GASTO_OPERATIVO', 'Combustible/Agua', 'Todas',       'GALP-04', NULL,               750.00, 'CC-SERV', 'Administrador', FALSE, 150),
+                        ('GAS-FLETE-INS',   'Flete o acarreo de sacos de alimento / insumos', 'GASTO_OPERATIVO', 'Transporte',       'Todas',       'GALP-04', NULL,               600.00, 'CC-ALIM', 'Administrador', FALSE, 160),
+                        ('GAS-ENERG-AGUA',  'Recibo energía eléctrica / bombeo de agua',      'GASTO_OPERATIVO', 'Servicios',        'Todas',       'GALP-01', NULL,               1850.00,'CC-SERV', 'Administrador', FALSE, 170),
+                        ('GAS-HONOR-VET',   'Asistencia clínica / diagnóstico laboratorio ext.','GASTO_OPERATIVO','Otros',           'Todas',       'GALP-01', NULL,               1200.00,'CC-VET',  'Administrador', FALSE, 180)
+                    ) AS d(codigo, nombre, tipo_registro, categoria, etapa_sugerida, galpon_sugerido, duracion_sugerida, tarifa_nio, cc_codigo, rol_sugerido, req_insumo, orden)
+                    ON CONFLICT (codigo) DO NOTHING;
+
+                    INSERT INTO catalogo_horarios_turnos (granja_id, codigo, nombre, tipo_horario, hora_inicio, hora_fin, categoria_actividad, etapa_aplicable, rol_responsable, prioridad_default, descripcion, orden)
+                    SELECT @granja, d.codigo, d.nombre, d.tipo_horario, d.h_ini, d.h_fin, d.cat, d.etapa, d.rol, d.prio, d.descr, d.orden
+                    FROM (VALUES
+                        ('TUR-MAN',       'Turno Mañana (06:00 - 14:00)',                'TURNO_JORNADA',    '06:00', '14:00', 'Manejo',       'Todas',       'Operario',    'Media',   'Primera jornada operativa.', 10),
+                        ('TUR-TAR',       'Turno Tarde (14:00 - 20:00)',                 'TURNO_JORNADA',    '14:00', '20:00', 'Manejo',       'Todas',       'Operario',    'Media',   'Segunda jornada operativa.', 20),
+                        ('TUR-NOC',       'Turno Guardia Nocturna (20:00 - 06:00)',      'TURNO_JORNADA',    '20:00', '06:00', 'Reproduccion', 'Maternidad',  'Operario',    'Alta',    'Vigilancia de partos inminentes.', 30),
+                        ('TUR-COMP',      'Jornada Técnica Diurna (07:00 - 16:00)',      'TURNO_JORNADA',    '07:00', '16:00', 'Sanidad',      'Todas',       'Veterinario', 'Media',   'Horario administrativo y clínica.', 40),
+                        ('ALIM-0630',     'Toma 1 · Mañana Temprano (06:30)',            'TOMA_ALIMENTO',    '06:30', '07:30', 'Alimentacion', 'Todas',       'Operario',    'Alta',    'Primera ración del día.', 50),
+                        ('ALIM-1030',     'Toma 2 · Media Mañana Lechones (10:30)',      'TOMA_ALIMENTO',    '10:30', '11:00', 'Alimentacion', 'Precebo',     'Operario',    'Media',   'Refuerzo de preiniciador.', 60),
+                        ('ALIM-1430',     'Toma 3 · Tarde Lechones / Nodrizas (14:30)',  'TOMA_ALIMENTO',    '14:30', '15:00', 'Alimentacion', 'Maternidad',  'Operario',    'Media',   'Tercera ración lactancia.', 70),
+                        ('ALIM-1630',     'Toma 4 · Cierre Vespertino (16:30)',          'TOMA_ALIMENTO',    '16:30', '17:30', 'Alimentacion', 'Engorde',     'Operario',    'Alta',    'Segunda ración principal.', 80),
+                        ('ALIM-1900',     'Toma 5 · Nocturna Maternidad (19:00)',        'TOMA_ALIMENTO',    '19:00', '19:30', 'Alimentacion', 'Maternidad',  'Operario',    'Media',   'Estímulo nocturno maternidad.', 90),
+                        ('IA-1-MAN',      '1ra Dosis Inseminación · Mañana (07:00)',     'DOSIS_IA',         '07:00', '09:00', 'Reproduccion', 'Gestación',   'Veterinario', 'Alta',    'Primera aplicación seminal.', 100),
+                        ('IA-2-TAR',      '2da Dosis Inseminación · Tarde +12h (17:00)', 'DOSIS_IA',         '17:00', '19:00', 'Reproduccion', 'Gestación',   'Veterinario', 'Alta',    'Segunda dosis de refuerzo.', 110),
+                        ('IA-3-REF',      '3ra Dosis Refuerzo · Mañana Día +1 (07:00)',  'DOSIS_IA',         '07:00', '08:30', 'Reproduccion', 'Gestación',   'Veterinario', 'Media',   'Refuerzo tardío.', 120),
+                        ('AGD-RACION-AM', 'Suministro Ración AM y Chequeo Bebederos',    'PLANTILLA_AGENDA', '06:30', '08:00', 'Alimentacion', 'Todas',       'Operario',    'Alta',    'Dispensar alimento según curva.', 130),
+                        ('AGD-RONDA-MAT', 'Ronda de Maternidad, Calostro y Neonatos',    'PLANTILLA_AGENDA', '07:00', '08:30', 'Reproduccion', 'Maternidad',  'Veterinario', 'Urgente', 'Control lechoneras y nodrizas.', 140),
+                        ('AGD-VAC-HIERRO','Aplicación de Hierro Dextrano + Toltrazuril', 'PLANTILLA_AGENDA', '08:30', '10:00', 'Sanidad',      'Maternidad',  'Veterinario', 'Alta',    'Protocolo Día 3 de vida.', 150),
+                        ('AGD-ASEO-NAVE', 'Lavado, Desinfección y Recarga de Pediluvios','PLANTILLA_AGENDA', '09:30', '11:30', 'Bioseguridad', 'Todas',       'Operario',    'Media',   'Higienización de pasillos.', 160),
+                        ('AGD-ECO-28D',   'Ecografía de Diagnóstico de Gestación (D+28)','PLANTILLA_AGENDA', '10:30', '12:00', 'Reproduccion', 'Gestación',   'Veterinario', 'Alta',    'Confirmación ultrasónica.', 170),
+                        ('AGD-PESAJE-SEM','Pesaje Muestral Semanal y Calibración GMD',   'PLANTILLA_AGENDA', '13:30', '15:30', 'Manejo',       'Engorde',     'Operario',    'Media',   'Muestreo de peso por corral.', 180),
+                        ('AGD-RACION-PM', 'Suministro Ración PM y Control Ventilación',  'PLANTILLA_AGENDA', '16:30', '17:30', 'Alimentacion', 'Todas',       'Operario',    'Alta',    'Segunda entrega diaria.', 190),
+                        ('AGD-AUD-SILOS', 'Lectura de Nivel de Silos y Stock Kardex',    'PLANTILLA_AGENDA', '17:30', '18:30', 'Mantenimiento','Todas',       'Administrador','Media',  'Conciliación diaria de kilos.', 200)
+                    ) AS d(codigo, nombre, tipo_horario, h_ini, h_fin, cat, etapa, rol, prio, descr, orden)
+                    ON CONFLICT (codigo) DO NOTHING;
+
+                    INSERT INTO catalogo_clinico_sanitario (granja_id, codigo, tipo_catalogo, nombre, subcategoria, dias_retiro_referencia, orden)
+                    SELECT @granja, d.codigo, d.tipo, d.nombre, d.subcat, d.retiro, d.orden
+                    FROM (VALUES
+                        ('MORT-APLAST',  'CAUSA_MORTALIDAD',    'Aplastamiento perinatal por madre',      'Maternidad', 0, 10),
+                        ('MORT-INANIC',  'CAUSA_MORTALIDAD',    'Inanición / Bajo peso al nacer (<0.9kg)','Maternidad', 0, 20),
+                        ('MORT-NEUMON',  'CAUSA_MORTALIDAD',    'Complejo respiratorio / Neumonía aguda', 'Precebo',    0, 30),
+                        ('MORT-DIARR',   'CAUSA_MORTALIDAD',    'Colibacilosis / Diarrea severa neonatal','Maternidad', 0, 40),
+                        ('MORT-INFEC',   'CAUSA_MORTALIDAD',    'Septicemia / Infección estreptocócica',  'Todas',      0, 50),
+                        ('MORT-PROLAP',  'CAUSA_MORTALIDAD',    'Prolapso o torsión gástrica aguda',      'Engorde',    0, 60),
+                        ('MORT-CARDIO',  'CAUSA_MORTALIDAD',    'Muerte súbita / Estrés cardiovascular',  'Engorde',    0, 70),
+                        ('MORT-OTRA',    'CAUSA_MORTALIDAD',    'Accidente traumático / Sacrificio hum.', 'Todas',      0, 80),
+                        ('DIAG-ANEMIA',  'DIAGNOSTICO_CLINICO', 'Profilaxis férrica / Anemia neonatal',   'Preventivo', 0, 10),
+                        ('DIAG-RESP',    'DIAGNOSTICO_CLINICO', 'Infección respiratoria (Mycoplasma/APP)','Respiratorio',14, 20),
+                        ('DIAG-DIGEST',  'DIAGNOSTICO_CLINICO', 'Enteritis bacteriana / Diarrea post-dest.','Digestivo',10, 30),
+                        ('DIAG-MASTIT',  'DIAGNOSTICO_CLINICO', 'Síndrome MMA (Metritis-Mastitis-Agalactia)','Maternidad',7,40),
+                        ('DIAG-PODAL',   'DIAGNOSTICO_CLINICO', 'Cojera / Inflamación articular y podal', 'Locomotor',  5, 50),
+                        ('DIAG-PARASIT', 'DIAGNOSTICO_CLINICO', 'Control de endoparásitos y sarna',       'Preventivo', 18,60),
+                        ('DIAG-VACUNA',  'DIAGNOSTICO_CLINICO', 'Inmunización programada calendario oficial','Biológico',0, 70),
+                        ('DIAG-PARTO',   'DIAGNOSTICO_CLINICO', 'Asistencia obstétrica / Inducción oxitócica','Maternidad',0,80),
+                        ('VIA-IM',       'VIA_ADMINISTRACION',  'Intramuscular profunda (IM)',             'Parenteral', 0, 10),
+                        ('VIA-SC',       'VIA_ADMINISTRACION',  'Subcutánea (SC retroauricular)',         'Parenteral', 0, 20),
+                        ('VIA-VO',       'VIA_ADMINISTRACION',  'Vía Oral (VO / Agua de bebida)',         'Oral',       0, 30),
+                        ('VIA-TOP',      'VIA_ADMINISTRACION',  'Tópica / Desinfección cutánea',          'Externa',    0, 40),
+                        ('VIA-IV',       'VIA_ADMINISTRACION',  'Intravenosa auricular (IV)',             'Parenteral', 0, 50),
+                        ('IA-PCAI',      'TECNICA_IA',          'Post-Cervical (PCAI)',                   'inseminacion_post_cervical', 0, 10),
+                        ('IA-TRAD',      'TECNICA_IA',          'Cervical Clásica Tradicional',           'inseminacion_cervical',      0, 20),
+                        ('IA-MONTA',     'TECNICA_IA',          'Monta Natural Dirigida',                 'monta_natural',              0, 30),
+                        ('ETP-MAT',      'ETAPA_ZOOTECNICA',    'Maternidad',                             '0 - 21 días',    0, 10),
+                        ('ETP-PREC',     'ETAPA_ZOOTECNICA',    'Precebo',                                '22 - 70 días',   0, 20),
+                        ('ETP-CREC',     'ETAPA_ZOOTECNICA',    'Crecimiento',                            '71 - 115 días',  0, 30),
+                        ('ETP-ENG',      'ETAPA_ZOOTECNICA',    'Engorde',                                '116 - 165 días', 0, 40),
+                        ('ETP-GEST',     'ETAPA_ZOOTECNICA',    'Gestación',                              'Reproductoras',  0, 50),
+                        ('ETP-REEMP',    'ETAPA_ZOOTECNICA',    'Reemplazo',                              'Primerizas',     0, 60)
+                    ) AS d(codigo, tipo, nombre, subcat, retiro, orden)
+                    ON CONFLICT (codigo) DO NOTHING;";
+
+                await using var cmdCatM = new NpgsqlCommand(sqlCatalogosMaestros, conn);
+                cmdCatM.Parameters.AddWithValue("granja", granjaId);
+                await cmdCatM.ExecuteNonQueryAsync();
+            }
+            catch { /* Resiliente */ }
+
+            // Paso 2.2: Índices compuestos idempotentes para consultas por rol, fecha, catálogos y Sync
+            try
+            {
+                const string sqlIndicesOptimizados = @"
+                    CREATE INDEX IF NOT EXISTS idx_tareas_fecha_rol_estado
+                        ON tareas_actividades_granja (fecha_programada, asignado_a_rol, estado);
+                    CREATE INDEX IF NOT EXISTS idx_tareas_asignado_nombre
+                        ON tareas_actividades_granja (asignado_a_nombre, fecha_programada);
+                    CREATE INDEX IF NOT EXISTS idx_kardex_fecha_tipo
+                        ON movimientos_kardex (fecha_hora DESC, tipo_movimiento);
+                    CREATE INDEX IF NOT EXISTS idx_tratamientos_fecha
+                        ON registro_tratamientos_clinicos (fecha_aplicacion DESC);
+                    CREATE INDEX IF NOT EXISTS idx_cerdos_activo_etapa
+                        ON cerdos_individuales (activo, etapa_actual);
+                    CREATE INDEX IF NOT EXISTS idx_jaulas_galpon_activo
+                        ON jaulas_corrales (galpon_id, activo);
+                    CREATE INDEX IF NOT EXISTS idx_labores_tipo_activo
+                        ON catalogo_labores_campo (tipo_registro, activo, orden);
+                    CREATE INDEX IF NOT EXISTS idx_horarios_tipo_activo
+                        ON catalogo_horarios_turnos (tipo_horario, activo, orden);
+                    CREATE INDEX IF NOT EXISTS idx_clinico_tipo_activo
+                        ON catalogo_clinico_sanitario (tipo_catalogo, activo, orden);
+                    CREATE INDEX IF NOT EXISTS idx_outbox_client_estado
+                        ON sync_outbox_logs (client_sync_id, estado_procesamiento);
+                    CREATE INDEX IF NOT EXISTS idx_alertas_estado_tipo_fecha
+                        ON alertas_operativas_desviaciones (estado, tipo_alerta, fecha_deteccion DESC);
+                    CREATE INDEX IF NOT EXISTS idx_usuarios_activo_rol
+                        ON usuarios_operadores (activo, rol);
+                    CREATE INDEX IF NOT EXISTS idx_usuarios_login_lower
+                        ON usuarios_operadores (lower(nombre_usuario));";
+                await using var cmdIdx = new NpgsqlCommand(sqlIndicesOptimizados, conn);
+                await cmdIdx.ExecuteNonQueryAsync();
+            }
+            catch { /* Resiliente ante entornos con índices ya aplicados o permisos restringidos */ }
 
             _baseEntitiesListas = true;
         }
@@ -683,253 +844,357 @@ public class AgroPigDataService
     // =========================================================================
     // 1. DASHBOARD PRINCIPAL (BI)
     // =========================================================================
-    public async Task<DashboardBiViewModel> GetDashboardBiDataAsync()
+    public async Task<(List<CatalogoGalponMovilDto> Galpones, List<CatalogoHorarioMovilDto> Turnos)> GetPreferenciasSelectorCatalogAsync()
     {
-        var model = new DashboardBiViewModel();
-
-        await using var conn = CreateConnection();
-        await conn.OpenAsync();
-
-        // 1.1 KPI Costo / Kg Producido (Solo Administrador)
-        await using (var cmd = new NpgsqlCommand("SELECT costo_por_kg_producido_usd, variacion_vs_target_usd FROM v_analisis_costo_kg_producido LIMIT 1;", conn))
-        await using (var reader = await cmd.ExecuteReaderAsync())
+        await EnsureBaseEntitiesAsync();
+        return await _cache.GetOrCreateAsync(CacheKey("sel_prefs"), async entry =>
         {
-            if (await reader.ReadAsync())
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+            var galpones = new List<CatalogoGalponMovilDto>();
+            var turnos = new List<CatalogoHorarioMovilDto>();
+
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+
+            try
             {
-                model.CostoKgProducido = reader.IsDBNull(0) ? 0.00m : reader.GetDecimal(0);
-                model.VariacionCostoTarget = reader.IsDBNull(1) ? 0.00m : reader.GetDecimal(1);
+                await using var cmdG = new NpgsqlCommand(@"
+                    SELECT codigo, nombre, tipo_sistema, capacidad_cabezas,
+                           COALESCE(temperatura_ambiente_celsius, 22.0), COALESCE(humedad_relativa_pct, 60.0)
+                    FROM galpones_naves
+                    WHERE activo = TRUE
+                    ORDER BY codigo;", conn);
+                await using var rG = await cmdG.ExecuteReaderAsync();
+                while (await rG.ReadAsync())
+                    galpones.Add(new CatalogoGalponMovilDto(rG.GetString(0), rG.GetString(1), rG.GetString(2), rG.GetInt32(3), rG.GetDecimal(4), rG.GetDecimal(5)));
             }
-        }
+            catch { /* Resiliente */ }
 
-        // 1.2 KPI GMD promedio y Lotes Activos
-        await using (var cmd = new NpgsqlCommand("SELECT COALESCE(AVG(gmd_actual_g_dia), 0), COUNT(*) FROM lotes_produccion WHERE estado = 'activo';", conn))
-        await using (var reader = await cmd.ExecuteReaderAsync())
-        {
-            if (await reader.ReadAsync())
+            try
             {
-                model.GmdPromedio = Convert.ToInt32(reader.GetDecimal(0));
-                model.LotesActivosCount = reader.GetInt32(1);
+                await using var cmdH = new NpgsqlCommand(@"
+                    SELECT codigo, nombre, tipo_horario, hora_inicio, COALESCE(hora_fin, ''),
+                           COALESCE(categoria_actividad, ''), COALESCE(etapa_aplicable, ''),
+                           COALESCE(rol_responsable, 'Operario'), prioridad_default, COALESCE(descripcion, '')
+                    FROM catalogo_horarios_turnos
+                    WHERE activo = TRUE AND tipo_horario = 'TURNO_JORNADA'
+                    ORDER BY orden, hora_inicio;", conn);
+                await using var rH = await cmdH.ExecuteReaderAsync();
+                while (await rH.ReadAsync())
+                    turnos.Add(new CatalogoHorarioMovilDto(
+                        rH.GetString(0), rH.GetString(1), rH.GetString(2), rH.GetString(3), rH.GetString(4),
+                        rH.GetString(5), rH.GetString(6), rH.GetString(7), rH.GetString(8), rH.GetString(9)));
             }
-        }
+            catch { /* Resiliente */ }
 
-        // 1.3 KPI Fertilidad y Nacidos Vivos
-        await using (var cmd = new NpgsqlCommand(@"
-            SELECT 
-                ROUND((COUNT(CASE WHEN resultado_concepcion = 'confirmada_positiva' THEN 1 END)::numeric / NULLIF(COUNT(*), 0)) * 100, 1),
-                COUNT(*),
-                COUNT(CASE WHEN resultado_concepcion = 'confirmada_positiva' THEN 1 END)
-            FROM servicios_inseminacion;", conn))
-        await using (var reader = await cmd.ExecuteReaderAsync())
-        {
-            if (await reader.ReadAsync() && !reader.IsDBNull(0))
-            {
-                model.TasaFertilidad = reader.GetDecimal(0);
-                model.ServiciosMes = reader.GetInt32(1);
-                model.ConfirmadasEco = reader.GetInt32(2);
-            }
-        }
+            return (galpones, turnos);
+        })!;
+    }
 
-        await using (var cmd = new NpgsqlCommand("SELECT COALESCE(AVG(nacidos_vivos), 0) FROM partos;", conn))
-        {
-            var res = await cmd.ExecuteScalarAsync();
-            if (res != null && res != DBNull.Value)
-            {
-                model.PromedioNacidosVivos = Math.Round(Convert.ToDecimal(res), 1);
-            }
-        }
+    public async Task<DashboardBiViewModel> GetDashboardBiDataAsync(
+        string? rolRaw = null,
+        string? nombreUsuario = null,
+        string? galponCodigo = null,
+        IEnumerable<string>? modulosVisibles = null)
+    {
+        await EnsureBaseEntitiesAsync();
+        var rol = ResolveRole(rolRaw);
+        var usuarioNom = ResolveUserName(nombreUsuario);
+        var galponClean = string.IsNullOrWhiteSpace(galponCodigo) ? "" : galponCodigo.Trim();
+        var visSet = modulosVisibles?
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Select(m => m.Trim().ToUpperInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var visKey = visSet != null && visSet.Count > 0 ? string.Join(",", visSet.OrderBy(x => x)) : "ALL";
 
-        // 1.4 Silos individuales y Capacidad Total
-        await using (var cmd = new NpgsqlCommand("SELECT id, codigo, nombre, capacidad_maxima_kg, nivel_actual_kg, COALESCE(tipo_insumo_principal, 'Concentrado') FROM silos_depositos ORDER BY codigo;", conn))
-        await using (var reader = await cmd.ExecuteReaderAsync())
+        bool Ver(string modulo) => visSet == null || visSet.Count == 0 || visSet.Contains(modulo);
+
+        return (await _cache.GetOrCreateAsync(CacheKey("dash", rol, usuarioNom, galponClean, visKey), async entry =>
         {
-            decimal totNivel = 0;
-            decimal totCap = 0;
-            while (await reader.ReadAsync())
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(15);
+
+            var model = new DashboardBiViewModel();
+            bool esAdmin = rol == AppRoles.Administrador;
+            bool esVet = rol == AppRoles.Veterinario;
+            bool esOp = rol == AppRoles.Operario;
+
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+
+            // Resolver galpón si hay filtro activo
+            Guid? galponIdFiltro = null;
+            string galponNombreFiltro = "";
+            if (!string.IsNullOrWhiteSpace(galponClean))
             {
-                var cap = reader.GetDecimal(3);
-                var niv = reader.GetDecimal(4);
-                totNivel += niv;
-                totCap += cap;
-                model.Silos.Add(new SiloDetalleItem
+                try
                 {
-                    Id = reader.GetGuid(0),
-                    Codigo = reader.GetString(1),
-                    Nombre = reader.GetString(2),
-                    CapacidadMaximaKg = cap,
-                    NivelActualKg = niv,
-                    InsumoPrincipal = reader.GetString(5)
-                });
+                    await using var cmdGf = new NpgsqlCommand(@"
+                        SELECT id, nombre
+                        FROM galpones_naves
+                        WHERE activo = TRUE AND (upper(codigo) = upper(@g) OR upper(nombre) = upper(@g))
+                        LIMIT 1;", conn);
+                    cmdGf.Parameters.AddWithValue("g", galponClean);
+                    await using var rGf = await cmdGf.ExecuteReaderAsync();
+                    if (await rGf.ReadAsync())
+                    {
+                        galponIdFiltro = rGf.GetGuid(0);
+                        galponNombreFiltro = rGf.GetString(1);
+                    }
+                    else
+                    {
+                        galponNombreFiltro = galponClean;
+                    }
+                }
+                catch { galponNombreFiltro = galponClean; }
             }
-            model.ToneladasSilo = Math.Round(totNivel / 1000.0m, 2);
-            model.PorcentajeCapacidadSilos = totCap > 0 ? (int)Math.Round((totNivel / totCap) * 100m) : 0;
-        }
 
-        // 1.5 Ocupación de Jaulas / Corrales (Operario y Veterinario)
-        try
-        {
-            await using (var cmd = new NpgsqlCommand("SELECT COALESCE(SUM(ocupacion_actual), 0), COUNT(*) FROM jaulas_corrales WHERE activo = true;", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync())
+            // 1.1 KPI Financiero (Solo Administrador)
+            if (esAdmin)
             {
-                if (await reader.ReadAsync())
+                try
                 {
-                    model.JaulasOcupadas = Convert.ToInt32(reader.GetInt64(0));
-                    model.JaulasTotales = Convert.ToInt32(reader.GetInt64(1));
+                    await using var cmd = new NpgsqlCommand("SELECT costo_por_kg_producido_usd, variacion_vs_target_usd FROM v_analisis_costo_kg_producido LIMIT 1;", conn);
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    if (await reader.ReadAsync())
+                    {
+                        model.CostoKgProducido = reader.IsDBNull(0) ? 0.00m : reader.GetDecimal(0);
+                        model.VariacionCostoTarget = reader.IsDBNull(1) ? 0.00m : reader.GetDecimal(1);
+                    }
+                }
+                catch { /* Resiliente */ }
+            }
+
+            // 1.2 Escalares consolidados compartidos (1 solo roundtrip)
+            try
+            {
+                await using var cmdCore = new NpgsqlCommand(@"
+                    SELECT
+                        COALESCE((SELECT AVG(gmd_actual_g_dia) FROM lotes_produccion WHERE estado = 'activo' AND (@gid::uuid IS NULL OR galpon_id = @gid::uuid)), 0),
+                        (SELECT COUNT(*) FROM lotes_produccion WHERE estado = 'activo' AND (@gid::uuid IS NULL OR galpon_id = @gid::uuid)),
+                        COALESCE((SELECT SUM(ocupacion_actual) FROM jaulas_corrales WHERE activo = true AND (@gid::uuid IS NULL OR galpon_id = @gid::uuid)), 0),
+                        (SELECT COUNT(*) FROM jaulas_corrales WHERE activo = true AND (@gid::uuid IS NULL OR galpon_id = @gid::uuid)),
+                        COALESCE((SELECT SUM(cantidad) FROM movimientos_kardex WHERE tipo_movimiento LIKE 'salida%' AND fecha_hora::date = CURRENT_DATE), 0);", conn);
+                cmdCore.Parameters.Add(new NpgsqlParameter("gid", NpgsqlTypes.NpgsqlDbType.Uuid) { Value = (object?)galponIdFiltro ?? DBNull.Value });
+                await using var rCore = await cmdCore.ExecuteReaderAsync();
+                if (await rCore.ReadAsync())
+                {
+                    model.GmdPromedio = Convert.ToInt32(rCore.GetDecimal(0));
+                    model.LotesActivosCount = Convert.ToInt32(rCore.GetInt64(1));
+                    model.JaulasOcupadas = Convert.ToInt32(rCore.GetInt64(2));
+                    model.JaulasTotales = Convert.ToInt32(rCore.GetInt64(3));
+                    model.AlimentoSuministradoHoyKg = rCore.IsDBNull(4) ? 0m : Convert.ToDecimal(rCore.GetDecimal(4));
                 }
             }
-        }
-        catch { /* Resiliente */ }
+            catch { /* Resiliente */ }
 
-        // 1.6 Tareas de Hoy (Operario)
-        try
-        {
-            await using (var cmd = new NpgsqlCommand(@"
-                SELECT id, titulo, descripcion, tipo_actividad, prioridad, estado,
-                       fecha_programada, hora_programada, COALESCE(galpon_nombre, ''),
-                       COALESCE(lote_codigo, ''), COALESCE(cerda_caravana, ''),
-                       COALESCE(asignado_a_nombre, ''), COALESCE(asignado_a_rol, '')
-                FROM tareas_actividades_granja
-                WHERE fecha_programada = CURRENT_DATE
-                ORDER BY CASE prioridad WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'media' THEN 3 ELSE 4 END, hora_programada ASC;", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync())
+            // 1.3 KPIs Reproductivos y Sanitarios consolidados (Solo Administrador o Veterinario)
+            if (esAdmin || esVet)
             {
+                try
+                {
+                    await using var cmdClin = new NpgsqlCommand(@"
+                        SELECT
+                            COALESCE((SELECT ROUND((COUNT(CASE WHEN resultado_concepcion = 'confirmada_positiva' THEN 1 END)::numeric / NULLIF(COUNT(*), 0)) * 100, 1) FROM servicios_inseminacion), 0),
+                            (SELECT COUNT(*) FROM servicios_inseminacion),
+                            (SELECT COUNT(CASE WHEN resultado_concepcion = 'confirmada_positiva' THEN 1 END) FROM servicios_inseminacion),
+                            COALESCE((SELECT AVG(nacidos_vivos) FROM partos), 0),
+                            (SELECT COUNT(*) FROM registro_tratamientos_clinicos WHERE fecha_aplicacion >= date_trunc('month', CURRENT_DATE)),
+                            COALESCE((SELECT SUM(dosis_aplicada) FROM registro_tratamientos_clinicos WHERE fecha_aplicacion >= date_trunc('month', CURRENT_DATE)), 0),
+                            (SELECT COUNT(DISTINCT crotal_cerda) FROM registro_tratamientos_clinicos WHERE fecha_aplicacion >= date_trunc('month', CURRENT_DATE));", conn);
+                    await using var rClin = await cmdClin.ExecuteReaderAsync();
+                    if (await rClin.ReadAsync())
+                    {
+                        model.TasaFertilidad = rClin.IsDBNull(0) ? 0m : rClin.GetDecimal(0);
+                        model.ServiciosMes = Convert.ToInt32(rClin.GetInt64(1));
+                        model.ConfirmadasEco = Convert.ToInt32(rClin.GetInt64(2));
+                        model.PromedioNacidosVivos = rClin.IsDBNull(3) ? 0m : Math.Round(Convert.ToDecimal(rClin.GetDecimal(3)), 1);
+                        model.TratamientosAplicadosMes = Convert.ToInt32(rClin.GetInt64(4));
+                        model.DosisMedicamentosMlMes = rClin.IsDBNull(5) ? 0m : rClin.GetDecimal(5);
+                        model.AnimalesBajoTratamiento = Convert.ToInt32(rClin.GetInt64(6));
+                    }
+                }
+                catch { /* Resiliente */ }
+            }
+
+            // 1.4 Silos individuales y Capacidad Total
+            if (Ver("SILOS_NIVEL") || Ver("METRICAS_VIVO"))
+            {
+                await using var cmd = new NpgsqlCommand("SELECT id, codigo, nombre, capacidad_maxima_kg, nivel_actual_kg, COALESCE(tipo_insumo_principal, 'Concentrado') FROM silos_depositos ORDER BY codigo;", conn);
+                await using var reader = await cmd.ExecuteReaderAsync();
+                decimal totNivel = 0;
+                decimal totCap = 0;
                 while (await reader.ReadAsync())
                 {
-                    var tarea = new TareaActividadItem
+                    var cap = reader.GetDecimal(3);
+                    var niv = reader.GetDecimal(4);
+                    totNivel += niv;
+                    totCap += cap;
+                    model.Silos.Add(new SiloDetalleItem
                     {
                         Id = reader.GetGuid(0),
-                        Titulo = reader.GetString(1),
-                        Descripcion = reader.GetString(2),
-                        TipoActividad = reader.GetString(3),
-                        Prioridad = reader.GetString(4),
-                        Estado = reader.GetString(5),
-                        FechaProgramada = reader.GetDateTime(6),
-                        HoraProgramada = reader.GetString(7),
-                        GalponNombre = reader.GetString(8),
-                        LoteCodigo = reader.GetString(9),
-                        CerdaCaravana = reader.GetString(10),
-                        AsignadoANombre = reader.GetString(11),
-                        AsignadoARol = reader.GetString(12)
-                    };
-                    model.TareasHoy.Add(tarea);
-                    if (tarea.EstaCompletada) model.TareasCompletadasHoy++;
-                    else model.TareasPendientesHoy++;
+                        Codigo = reader.GetString(1),
+                        Nombre = reader.GetString(2),
+                        CapacidadMaximaKg = cap,
+                        NivelActualKg = niv,
+                        InsumoPrincipal = reader.GetString(5)
+                    });
                 }
+                model.ToneladasSilo = Math.Round(totNivel / 1000.0m, 2);
+                model.PorcentajeCapacidadSilos = totCap > 0 ? (int)Math.Round((totNivel / totCap) * 100m) : 0;
             }
-        }
-        catch { /* Resiliente */ }
 
-        // 1.7 Alimento Suministrado Hoy en Kg (Kardex salidas)
-        try
-        {
-            await using (var cmd = new NpgsqlCommand("SELECT COALESCE(SUM(cantidad), 0) FROM movimientos_kardex WHERE tipo_movimiento LIKE 'salida%' AND fecha_hora::date = CURRENT_DATE;", conn))
+            // 1.6 Tareas de Hoy filtradas por rol y galpón
+            if (Ver("TAREAS_HOY") || Ver("METRICAS_VIVO"))
             {
-                var res = await cmd.ExecuteScalarAsync();
-                model.AlimentoSuministradoHoyKg = res != null && res != DBNull.Value ? Convert.ToDecimal(res) : 0m;
-            }
-        }
-        catch { /* Resiliente */ }
-
-        // 1.8 Sanidad y Tratamientos Clínicos del Mes (Veterinario)
-        try
-        {
-            await using (var cmd = new NpgsqlCommand(@"
-                SELECT COUNT(*), COALESCE(SUM(dosis_aplicada), 0), COUNT(DISTINCT crotal_cerda)
-                FROM registro_tratamientos_clinicos
-                WHERE fecha_aplicacion >= date_trunc('month', CURRENT_DATE);", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync())
-            {
-                if (await reader.ReadAsync())
+                try
                 {
-                    model.TratamientosAplicadosMes = Convert.ToInt32(reader.GetInt64(0));
-                    model.DosisMedicamentosMlMes = reader.GetDecimal(1);
-                    model.AnimalesBajoTratamiento = Convert.ToInt32(reader.GetInt64(2));
-                }
-            }
-        }
-        catch { /* Resiliente */ }
+                    var roleFilterSql = esOp
+                        ? " AND (COALESCE(asignado_a_rol, '') IN ('Operario', 'operario_galpon', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) "
+                        : (esVet
+                            ? " AND (COALESCE(asignado_a_rol, '') IN ('Veterinario', 'director_veterinario', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) "
+                            : "");
+                    var galponFilterSql = !string.IsNullOrWhiteSpace(galponClean)
+                        ? " AND (galpon_nombre ILIKE @gCodPat OR (@gNomPat <> '' AND galpon_nombre ILIKE @gNomPat)) "
+                        : "";
 
-        // 1.9 Radar de Partos Inminentes (Veterinario)
-        try
-        {
-            await using (var cmd = new NpgsqlCommand("SELECT crotal_cerda, COALESCE(jaula_numero, 'Por asignar'), COALESCE(galpon_actual, 'Maternidad'), dias_para_parto, estado_alerta FROM v_radar_partos_inminentes LIMIT 6;", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync())
+                    await using var cmd = new NpgsqlCommand($@"
+                        SELECT id, titulo, descripcion, tipo_actividad, prioridad, estado,
+                               fecha_programada, hora_programada, COALESCE(galpon_nombre, ''),
+                               COALESCE(lote_codigo, ''), COALESCE(cerda_caravana, ''),
+                               COALESCE(asignado_a_nombre, ''), COALESCE(asignado_a_rol, '')
+                        FROM tareas_actividades_granja
+                        WHERE fecha_programada = CURRENT_DATE
+                        {roleFilterSql}
+                        {galponFilterSql}
+                        ORDER BY CASE lower(prioridad) WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2 WHEN 'media' THEN 3 ELSE 4 END, hora_programada ASC;", conn);
+                    if (esOp || esVet)
+                        cmd.Parameters.AddWithValue("uPat", string.IsNullOrWhiteSpace(usuarioNom) ? "" : $"%{usuarioNom}%");
+                    if (!string.IsNullOrWhiteSpace(galponClean))
+                    {
+                        cmd.Parameters.AddWithValue("gCodPat", $"%{galponClean}%");
+                        cmd.Parameters.AddWithValue("gNomPat", string.IsNullOrWhiteSpace(galponNombreFiltro) ? "" : $"%{galponNombreFiltro}%");
+                    }
+
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        var tarea = new TareaActividadItem
+                        {
+                            Id = reader.GetGuid(0),
+                            Titulo = reader.GetString(1),
+                            Descripcion = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                            TipoActividad = reader.GetString(3),
+                            Prioridad = reader.GetString(4),
+                            Estado = reader.GetString(5),
+                            FechaProgramada = reader.GetDateTime(6),
+                            HoraProgramada = reader.GetString(7),
+                            GalponNombre = reader.GetString(8),
+                            LoteCodigo = reader.GetString(9),
+                            CerdaCaravana = reader.GetString(10),
+                            AsignadoANombre = reader.GetString(11),
+                            AsignadoARol = reader.GetString(12)
+                        };
+                        model.TareasHoy.Add(tarea);
+                        if (tarea.EstaCompletada) model.TareasCompletadasHoy++;
+                        else model.TareasPendientesHoy++;
+                    }
+                }
+                catch { /* Resiliente */ }
+            }
+
+            // 1.9 Radar de Partos Inminentes (Exclusivo Administrador / Veterinario)
+            if ((esAdmin || esVet) && (Ver("ACCIONES_RAPIDAS") || Ver("RADAR_PARTOS")))
             {
+                try
+                {
+                    await using var cmd = new NpgsqlCommand("SELECT crotal_cerda, COALESCE(jaula_numero, 'Por asignar'), COALESCE(galpon_actual, 'Maternidad'), dias_para_parto, estado_alerta FROM v_radar_partos_inminentes LIMIT 6;", conn);
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        model.RadarPartos.Add(new PartoInminenteItem
+                        {
+                            Caravana = reader.GetString(0),
+                            Jaula = reader.GetString(1),
+                            DiasParaParto = reader.GetInt32(3),
+                            AvisoTemporal = reader.GetString(4)
+                        });
+                    }
+                }
+                catch { /* Resiliente */ }
+            }
+
+            // 1.10 Lotes Activos DataGrid (filtrado por galpón si aplica)
+            await using (var cmd = new NpgsqlCommand(@"
+                SELECT l.id, l.codigo_lote,
+                       COALESCE(NULLIF(l.fase_actual, ''), l.etapa_zootecnica),
+                       COALESCE(NULLIF(l.cantidad_actual_cabezas, 0), l.cantidad_actual, 0) AS cabezas,
+                       COALESCE(NULLIF(l.peso_promedio_actual_kg, 0),
+                                ROUND(l.peso_actual_total_kg / NULLIF(COALESCE(NULLIF(l.cantidad_actual_cabezas, 0), l.cantidad_actual), 0), 2),
+                                0) AS peso_prom,
+                       COALESCE(l.gmd_actual_g_dia, 0),
+                       COALESCE(g.nombre, 'Nave General') AS galpon_nombre,
+                       COALESCE(l.fcr_actual, 0)
+                FROM lotes_produccion l
+                LEFT JOIN galpones_naves g ON l.galpon_id = g.id
+                WHERE l.estado = 'activo'
+                  AND (@gid::uuid IS NULL OR l.galpon_id = @gid::uuid)
+                ORDER BY l.codigo_lote;", conn))
+            {
+                cmd.Parameters.Add(new NpgsqlParameter("gid", NpgsqlTypes.NpgsqlDbType.Uuid) { Value = (object?)galponIdFiltro ?? DBNull.Value });
+                await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
-                    model.RadarPartos.Add(new PartoInminenteItem
+                    model.Lotes.Add(new LoteItemBi
                     {
-                        Caravana = reader.GetString(0),
-                        Jaula = reader.GetString(1),
-                        DiasParaParto = reader.GetInt32(3),
-                        AvisoTemporal = reader.GetString(4)
+                        Id = reader.GetGuid(0),
+                        Codigo = reader.GetString(1),
+                        Etapa = reader.GetString(2),
+                        Cabezas = reader.GetInt32(3),
+                        PesoPromedioKg = reader.IsDBNull(4) ? 0m : reader.GetDecimal(4),
+                        Gmd = reader.IsDBNull(5) ? 0m : reader.GetDecimal(5),
+                        Galpon = reader.IsDBNull(6) ? "Nave General" : reader.GetString(6),
+                        Fcr = reader.IsDBNull(7) ? 0m : reader.GetDecimal(7)
                     });
                 }
             }
-        }
-        catch { /* Resiliente */ }
 
-        // 1.10 Lotes Activos DataGrid
-        await using (var cmd = new NpgsqlCommand(@"
-            SELECT l.id, l.codigo_lote,
-                   COALESCE(NULLIF(l.fase_actual, ''), l.etapa_zootecnica),
-                   COALESCE(NULLIF(l.cantidad_actual_cabezas, 0), l.cantidad_actual, 0) AS cabezas,
-                   COALESCE(NULLIF(l.peso_promedio_actual_kg, 0),
-                            ROUND(l.peso_actual_total_kg / NULLIF(COALESCE(NULLIF(l.cantidad_actual_cabezas, 0), l.cantidad_actual), 0), 2),
-                            0) AS peso_prom,
-                   COALESCE(l.gmd_actual_g_dia, 0),
-                   COALESCE(g.nombre, 'Nave General') AS galpon_nombre,
-                   COALESCE(l.fcr_actual, 0)
-            FROM lotes_produccion l
-            LEFT JOIN galpones_naves g ON l.galpon_id = g.id
-            WHERE l.estado = 'activo'
-            ORDER BY l.codigo_lote;", conn))
-        await using (var reader = await cmd.ExecuteReaderAsync())
-        {
-            while (await reader.ReadAsync())
+            // 1.11 Alertas Operativas filtradas por rol en SQL
+            var alertaSqlFilter = esOp
+                ? " AND tipo_alerta NOT IN ('desviacion_financiera', 'protocolo_sanitario', 'mortalidad_anormal') "
+                : (esVet ? " AND tipo_alerta <> 'desviacion_financiera' " : "");
+            await using (var cmd = new NpgsqlCommand($@"
+                SELECT tipo_alerta, nivel_severidad, descripcion, valor_detectado, fecha_deteccion
+                FROM alertas_operativas_desviaciones
+                WHERE estado = 'abierta'
+                {alertaSqlFilter}
+                ORDER BY fecha_deteccion DESC LIMIT 4;", conn))
+            await using (var reader = await cmd.ExecuteReaderAsync())
             {
-                model.Lotes.Add(new LoteItemBi
+                while (await reader.ReadAsync())
                 {
-                    Id = reader.GetGuid(0),
-                    Codigo = reader.GetString(1),
-                    Etapa = reader.GetString(2),
-                    Cabezas = reader.GetInt32(3),
-                    PesoPromedioKg = reader.IsDBNull(4) ? 0m : reader.GetDecimal(4),
-                    Gmd = reader.IsDBNull(5) ? 0m : reader.GetDecimal(5),
-                    Galpon = reader.IsDBNull(6) ? "Nave General" : reader.GetString(6),
-                    Fcr = reader.IsDBNull(7) ? 0m : reader.GetDecimal(7)
+                    model.Alertas.Add(new AlertaBiItem
+                    {
+                        Tipo = reader.GetString(0),
+                        Severidad = reader.GetString(1),
+                        Descripcion = reader.GetString(2),
+                        ValorDetectado = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                        Fecha = reader.GetDateTime(4)
+                    });
+                }
+            }
+
+            // 1.12 Gráficos Financieros (Solo Administrador y cuando el módulo esté visible)
+            if (esAdmin && Ver("RESUMEN_FINANCIERO"))
+            {
+                await CargarGraficosFinancierosAsync(conn, model.BarrasCentroCosto, model.BarrasMensuales, (ingresos, gastos, _) =>
+                {
+                    model.TotalIngresosVentasUsd = ingresos;
+                    model.TotalGastosOperativosUsd = gastos;
                 });
             }
-        }
 
-        // 1.11 Alertas Operativas en Vivo
-        await using (var cmd = new NpgsqlCommand(@"
-            SELECT tipo_alerta, nivel_severidad, descripcion, valor_detectado, fecha_deteccion
-            FROM alertas_operativas_desviaciones
-            WHERE estado = 'abierta'
-            ORDER BY fecha_deteccion DESC LIMIT 4;", conn))
-        await using (var reader = await cmd.ExecuteReaderAsync())
-        {
-            while (await reader.ReadAsync())
-            {
-                model.Alertas.Add(new AlertaBiItem
-                {
-                    Tipo = reader.GetString(0),
-                    Severidad = reader.GetString(1),
-                    Descripcion = reader.GetString(2),
-                    ValorDetectado = reader.IsDBNull(3) ? "" : reader.GetString(3),
-                    Fecha = reader.GetDateTime(4)
-                });
-            }
-        }
-
-        // 1.12 Cargar Gráficos Financieros de Barras para el Dashboard
-        await CargarGraficosFinancierosAsync(conn, model.BarrasCentroCosto, model.BarrasMensuales, (ingresos, gastos, _) =>
-        {
-            model.TotalIngresosVentasUsd = ingresos;
-            model.TotalGastosOperativosUsd = gastos;
-        });
-
-        return model;
+            return model;
+        }))!;
     }
 
     // =========================================================================
@@ -1080,12 +1345,12 @@ public class AgroPigDataService
             }
         }
 
-        // 2.6 Medicamentos y Biológicos para reporte de Veterinario
+        // 2.6 Medicamentos y Biológicos para reporte de Veterinario (excluye descartables KIT)
         await using (var cmdM = new NpgsqlCommand(@"
             SELECT i.id, i.codigo_sku as sku, i.nombre, c.nombre as categoria, i.unidad_medida as unidad_medida_base, i.costo_unitario_promedio_usd, i.stock_actual
             FROM insumos_catalogo i
             JOIN categorias_insumos c ON i.categoria_id = c.id
-            WHERE (c.codigo IN ('MED', 'BIO') OR i.codigo_sku LIKE 'MED-%') AND i.activo = true
+            WHERE c.codigo = 'MED' AND i.activo = true
             ORDER BY i.nombre;", conn))
         await using (var readerM = await cmdM.ExecuteReaderAsync())
         {
@@ -1379,6 +1644,7 @@ public class AgroPigDataService
             await cmd.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -1416,6 +1682,7 @@ public class AgroPigDataService
             await cmd.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -1443,6 +1710,7 @@ public class AgroPigDataService
             await cmd.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -1514,6 +1782,7 @@ public class AgroPigDataService
         }
 
         tx.Complete();
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -1589,14 +1858,16 @@ public class AgroPigDataService
         }
 
         tx.Complete();
+        InvalidarCachesOperativos();
         return true;
     }
 
     // =========================================================================
     // 3. PLANIFICACIÓN Y APERTURA DE LOTES
     // =========================================================================
-    public async Task<LotesPageViewModel> GetLotesPlanningDataAsync()
+    public async Task<LotesPageViewModel> GetLotesPlanningDataAsync(string? rolRaw = null)
     {
+        var rol = ResolveRole(rolRaw);
         var model = new LotesPageViewModel();
         await using var conn = CreateConnection();
         await conn.OpenAsync();
@@ -1717,6 +1988,8 @@ public class AgroPigDataService
             pesoActualLbs: loteDefecto.PesoPromedioLbs,
             fechaTope: loteDefecto.FechaCierreEstimada ?? DateTime.Today.AddDays(60)
         );
+        if (rol != AppRoles.Administrador)
+            model.ProyeccionDefecto?.LimpiarDatosFinancieros();
 
         model.GalponesTecnicos = await GetGalponesConJaulasAsync();
 
@@ -1874,15 +2147,30 @@ public class AgroPigDataService
             await cmd.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return codigoLote;
     }
 
     // =========================================================================
     // 4. CONTROL CENTRAL DE INVENTARIOS & INSUMOS (CRUD COMPLETO)
     // =========================================================================
-    public async Task<InventarioPageViewModel> GetInventarioDataAsync()
+    public async Task<decimal> GetCostoPromedioInsumoPorSkuAsync(string sku)
+    {
+        if (string.IsNullOrWhiteSpace(sku)) return 0m;
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT COALESCE(costo_unitario_promedio_usd, 0) FROM insumos_catalogo WHERE codigo_sku = @sku LIMIT 1;", conn);
+        cmd.Parameters.AddWithValue("sku", sku.Trim());
+        var res = await cmd.ExecuteScalarAsync();
+        return res != null && res != DBNull.Value ? Convert.ToDecimal(res) : 0m;
+    }
+
+    public async Task<InventarioPageViewModel> GetInventarioDataAsync(string? rolRaw = null)
     {
         await EnsureBaseEntitiesAsync();
+        var rol = ResolveRole(rolRaw);
+        bool esAdmin = rol == AppRoles.Administrador;
+        bool esOp = rol == AppRoles.Operario;
 
         var model = new InventarioPageViewModel();
         await using var conn = CreateConnection();
@@ -1918,16 +2206,17 @@ public class AgroPigDataService
             }
         }
 
-        // 4.3 Catálogo de Insumos Activos
-        await using (var cmd = new NpgsqlCommand(@"
+        // 4.3 Catálogo de Insumos Activos (Operario excluye medicamentos restringidos; solo Admin recibe costos)
+        var catFilterSql = esOp ? " AND c.codigo <> 'MED' " : "";
+        await using (var cmd = new NpgsqlCommand($@"
             SELECT i.id, i.codigo_sku, i.nombre, c.nombre as categoria, 
                    i.unidad_medida, i.stock_actual, i.stock_minimo_seguridad, 
                    i.costo_unitario_promedio_usd, s.nombre as silo_nombre, i.estado_stock,
-                   i.categoria_id, i.silo_deposito_id, COALESCE(i.descripcion, '')
+                   i.categoria_id, i.silo_deposito_id, COALESCE(i.descripcion, ''), c.codigo
             FROM insumos_catalogo i
             JOIN categorias_insumos c ON i.categoria_id = c.id
             LEFT JOIN silos_depositos s ON i.silo_deposito_id = s.id
-            WHERE i.activo = true
+            WHERE i.activo = true {catFilterSql}
             ORDER BY (i.stock_actual <= i.stock_minimo_seguridad) DESC, i.nombre;", conn))
         await using (var reader = await cmd.ExecuteReaderAsync())
         {
@@ -1939,10 +2228,11 @@ public class AgroPigDataService
                     Sku = reader.GetString(1),
                     Nombre = reader.GetString(2),
                     Categoria = reader.GetString(3),
+                    CategoriaCodigo = reader.GetString(13),
                     Unidad = reader.GetString(4),
                     StockActual = reader.GetDecimal(5),
                     StockMinimo = reader.GetDecimal(6),
-                    CostoUnitario = reader.GetDecimal(7),
+                    CostoUnitario = esAdmin ? reader.GetDecimal(7) : 0m,
                     Ubicacion = reader.IsDBNull(8) ? "Bodega Central" : reader.GetString(8),
                     Estado = reader.GetString(9),
                     CategoriaId = reader.GetGuid(10),
@@ -1953,8 +2243,8 @@ public class AgroPigDataService
             }
         }
 
-        // Totales calculados
-        model.ValorTotalInventario = model.Insumos.Sum(i => i.StockActual * i.CostoUnitario);
+        // Totales calculados (valorización exclusivamente para Administrador)
+        model.ValorTotalInventario = esAdmin ? model.Insumos.Sum(i => i.StockActual * i.CostoUnitario) : 0m;
         model.ItemsCriticosCount = model.Insumos.Count(i => i.StockActual <= i.StockMinimo || i.Estado == "reabastecer_urgente");
 
         // 4.4 Silos capacidad
@@ -1969,14 +2259,16 @@ public class AgroPigDataService
             }
         }
 
-        // 4.5 Últimos Movimientos Kardex
-        await using (var cmd = new NpgsqlCommand(@"
+        // 4.5 Últimos Movimientos Kardex (ocultar costos/valores para no-Admin)
+        var kardexCatFilterSql = esOp ? " JOIN categorias_insumos c ON i.categoria_id = c.id WHERE c.codigo <> 'MED' " : "";
+        await using (var cmd = new NpgsqlCommand($@"
             SELECT k.tipo_movimiento, k.cantidad, k.costo_unitario_usd, k.valor_total_usd,
                    k.fecha_hora, i.nombre, k.documento_referencia, l.codigo_lote
             FROM movimientos_kardex k
             JOIN insumos_catalogo i ON k.insumo_id = i.id
+            {kardexCatFilterSql}
             LEFT JOIN lotes_produccion l ON k.lote_id = l.id
-            ORDER BY k.fecha_hora DESC LIMIT 10;", conn))
+            ORDER BY k.fecha_hora DESC LIMIT 12;", conn))
         await using (var reader = await cmd.ExecuteReaderAsync())
         {
             while (await reader.ReadAsync())
@@ -1985,8 +2277,8 @@ public class AgroPigDataService
                 {
                     Tipo = reader.GetString(0),
                     Cantidad = reader.GetDecimal(1),
-                    CostoUnitario = reader.GetDecimal(2),
-                    ValorTotal = reader.GetDecimal(3),
+                    CostoUnitario = esAdmin ? reader.GetDecimal(2) : 0m,
+                    ValorTotal = esAdmin ? reader.GetDecimal(3) : 0m,
                     Fecha = reader.GetDateTime(4),
                     InsumoNombre = reader.GetString(5),
                     Documento = reader.IsDBNull(6) ? "" : reader.GetString(6),
@@ -2082,6 +2374,7 @@ public class AgroPigDataService
             await cmd.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2125,6 +2418,7 @@ public class AgroPigDataService
             await cmd.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2139,6 +2433,7 @@ public class AgroPigDataService
         {
             cmd.Parameters.AddWithValue("id", id);
             var affected = await cmd.ExecuteNonQueryAsync();
+            if (affected > 0) InvalidarCachesOperativos();
             return affected > 0;
         }
     }
@@ -2210,6 +2505,7 @@ public class AgroPigDataService
         }
 
         tx.Complete();
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2408,6 +2704,7 @@ public class AgroPigDataService
             await cmdT1.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2555,6 +2852,7 @@ public class AgroPigDataService
         }
 
         tx.Complete();
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2569,7 +2867,8 @@ public class AgroPigDataService
         decimal cantidad,
         string unidadMedida,
         DateTime fecha,
-        string observaciones)
+        string observaciones,
+        Guid? siloOverrideId = null)
     {
         // Kardex + gasto + presupuesto se confirman juntos o no se confirma nada
         using var tx = new System.Transactions.TransactionScope(System.Transactions.TransactionScopeAsyncFlowOption.Enabled);
@@ -2614,6 +2913,8 @@ public class AgroPigDataService
             stockDisponible = reader.GetDecimal(4);
             unidadCatalogo = reader.GetString(5);
         }
+
+        if (siloOverrideId.HasValue) siloId = siloOverrideId.Value;
 
         decimal factorCatalogoKg = FactorAKg(unidadCatalogo);
         decimal cantidadEnUnidadCatalogo = Math.Round(cantidadKg / factorCatalogoKg, 2);
@@ -2682,6 +2983,7 @@ public class AgroPigDataService
         }
 
         tx.Complete();
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2925,11 +3227,11 @@ public class AgroPigDataService
                     updated_at = NOW();", conn);
             cmdPres.Parameters.AddWithValue("lote", loteId.Value);
             cmdPres.Parameters.AddWithValue("cc", centroCostoSanId);
-            cmdPres.Parameters.AddWithValue("monto", costoTotalTratamiento);
             await cmdPres.ExecuteNonQueryAsync();
         }
 
         tx.Complete();
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -2977,12 +3279,18 @@ public class AgroPigDataService
         SyncBatchRequest batch,
         List<SyncRechazo>? rechazados = null,
         string? usuarioNombre = null,
-        string? usuarioMatricula = null)
+        string? usuarioMatricula = null,
+        string? usuarioRol = null)
     {
         await EnsureBaseEntitiesAsync();
         var savedIds = new List<string>();
         rechazados ??= new List<SyncRechazo>();
         if (batch == null) return savedIds;
+
+        var rolEfectivo = ResolveRole(usuarioRol);
+        bool esAdmin = rolEfectivo == AppRoles.Administrador;
+        bool puedeVet = rolEfectivo is AppRoles.Administrador or AppRoles.Veterinario;
+        bool puedeOp = rolEfectivo is AppRoles.Administrador or AppRoles.Operario;
 
         await using var conn = CreateConnection();
         await conn.OpenAsync();
@@ -3064,6 +3372,7 @@ public class AgroPigDataService
         {
             await ProcesarAsync(t.Id, "TRATAMIENTO", t, async () =>
             {
+                if (!puedeVet) return "Acceso denegado: solo el Veterinario o Administrador puede registrar tratamientos clínicos.";
                 if (string.IsNullOrWhiteSpace(t.Crotal)) return "Falta el crotal del animal tratado.";
                 if (string.IsNullOrWhiteSpace(t.Medicamento)) return "Falta el medicamento.";
                 if (t.Dosis <= 0) return "La dosis debe ser mayor que cero.";
@@ -3115,6 +3424,7 @@ public class AgroPigDataService
         {
             await ProcesarAsync(ev.Id, "EVENTO_REPRODUCTIVO", ev, async () =>
             {
+                if (!puedeVet) return "Acceso denegado: los eventos reproductivos (IA, Parto, Destete) requieren perfil Veterinario o Administrador.";
                 if (string.IsNullOrWhiteSpace(ev.CrotalCerda)) return "Falta la caravana de la cerda.";
 
                 var tipoUpper = (ev.TipoEvento ?? "").Trim().ToUpperInvariant();
@@ -3244,6 +3554,7 @@ public class AgroPigDataService
         {
             await ProcesarAsync(c.Id, "CONSUMO_ALIMENTO", c, async () =>
             {
+                if (!puedeOp) return "Acceso denegado: solo el Operario o Administrador puede registrar suministros de alimento.";
                 // La app envía cantidadKg / loteNombre / tipoAlimento; se aceptan ambos nombres
                 var cant = c.Cantidad > 0 ? c.Cantidad : c.CantidadKg;
                 var loteCod = !string.IsNullOrWhiteSpace(c.LoteCodigo) ? c.LoteCodigo : c.LoteNombre;
@@ -3278,13 +3589,25 @@ public class AgroPigDataService
                 }
                 if (!insumoId.HasValue) return $"El alimento '{insumoNom}' no existe en el catálogo de insumos.";
 
+                Guid? siloOverrideId = null;
+                if (!string.IsNullOrWhiteSpace(c.SiloCodigo))
+                {
+                    await using var cmdSilo = new NpgsqlCommand("SELECT id FROM silos_depositos WHERE codigo ILIKE @cod OR nombre ILIKE @nom LIMIT 1;", conn);
+                    cmdSilo.Parameters.AddWithValue("cod", c.SiloCodigo.Trim());
+                    cmdSilo.Parameters.AddWithValue("nom", $"%{c.SiloCodigo.Trim()}%");
+                    var rs = await cmdSilo.ExecuteScalarAsync();
+                    if (rs != null) siloOverrideId = (Guid)rs;
+                }
+
+                var horarioInfo = string.IsNullOrWhiteSpace(c.HorarioToma) ? "" : $" [Toma: {c.HorarioToma.Trim()}]";
                 var ok = await RegistrarConsumoAlimentoGastoAsync(
                     loteId: loteId.Value,
                     insumoId: insumoId.Value,
                     cantidad: cant,
                     unidadMedida: string.IsNullOrWhiteSpace(c.Unidad) ? "Kg" : c.Unidad,
                     fecha: FechaDeCliente(c.FechaRegistro),
-                    observaciones: $"Reporte móvil de {(!string.IsNullOrWhiteSpace(usuarioNombre) ? usuarioNombre : c.Operario)}");
+                    observaciones: $"Reporte móvil de {(!string.IsNullOrWhiteSpace(usuarioNombre) ? usuarioNombre : c.Operario)}{horarioInfo}",
+                    siloOverrideId: siloOverrideId);
                 return ok ? null : "No se pudo registrar el consumo (insumo o centro de costo no disponible).";
             });
         }
@@ -3296,6 +3619,7 @@ public class AgroPigDataService
             {
                 await ProcesarAsync(b.Id, "BAJA_MORTALIDAD", b, async () =>
                 {
+                    if (!puedeVet) return "Acceso denegado: solo el Veterinario o Administrador puede registrar bajas o mortalidad.";
                     if (string.IsNullOrWhiteSpace(b.Crotal)) return "Falta la caravana/crotal del animal.";
                     if (string.IsNullOrWhiteSpace(b.CausaMuerte)) return "Falta la causa clínica de muerte.";
 
@@ -3327,6 +3651,26 @@ public class AgroPigDataService
                 {
                     if (Guid.TryParse(te.Id, out var tid))
                     {
+                        if (rolEfectivo == AppRoles.Operario)
+                        {
+                            await using var cmdChkT = new NpgsqlCommand(
+                                "SELECT COALESCE(asignado_a_rol, ''), COALESCE(asignado_a_nombre, '') FROM tareas_actividades_granja WHERE id = @tid LIMIT 1;", conn);
+                            cmdChkT.Parameters.AddWithValue("tid", tid);
+                            await using var rChkT = await cmdChkT.ExecuteReaderAsync();
+                            if (await rChkT.ReadAsync())
+                            {
+                                var aRol = rChkT.GetString(0);
+                                var aNom = rChkT.GetString(1);
+                                bool asignadaAUser = !string.IsNullOrWhiteSpace(usuarioNombre)
+                                    && aNom.Contains(usuarioNombre.Trim(), StringComparison.OrdinalIgnoreCase);
+                                bool esTareaOtroRol = !asignadaAUser && (
+                                    aRol.Contains("Veterinario", StringComparison.OrdinalIgnoreCase)
+                                    || aRol.Contains("Administrador", StringComparison.OrdinalIgnoreCase));
+                                if (esTareaOtroRol)
+                                    return "Acceso denegado: esta tarea corresponde al perfil clínico o administrativo.";
+                            }
+                        }
+
                         var ok = await ActualizarEstadoTareaAsync(
                             tid,
                             te.Completada ? "completada" : (string.IsNullOrWhiteSpace(te.Estado) ? "completada" : te.Estado),
@@ -3355,15 +3699,40 @@ public class AgroPigDataService
                         || string.Equals(g.TipoRegistro, "MANO_OBRA", StringComparison.OrdinalIgnoreCase)
                         || string.Equals(g.Categoria, "Mano de Obra", StringComparison.OrdinalIgnoreCase);
 
-                    decimal factorJornal = g.HorasOJornal > 0 ? g.HorasOJornal : 1.0m;
-                    decimal montoNioEfectivo = g.MontoCordobas > 0
-                        ? g.MontoCordobas
-                        : (g.MontoDolares > 0
-                            ? Math.Round(g.MontoDolares * TasaCambioOficial, 2)
-                            : (esLabor ? Math.Round(TarifaJornalEstandarNio * factorJornal, 2) : 0m));
+                    if (!esLabor && !esAdmin)
+                        return "Acceso denegado: el registro de gastos financieros directos es exclusivo del Administrador.";
 
-                    decimal montoUsdEfectivo = g.MontoDolares > 0
-                        ? g.MontoDolares
+                    decimal tarifaLaborNio = TarifaJornalEstandarNio;
+                    if (esLabor && !esAdmin)
+                    {
+                        await using var cmdTar = new NpgsqlCommand(@"
+                            SELECT tarifa_referencia_nio, COALESCE(rol_sugerido, 'Operario')
+                            FROM catalogo_labores_campo
+                            WHERE activo = TRUE AND lower(nombre) = lower(@nom)
+                            LIMIT 1;", conn);
+                        cmdTar.Parameters.AddWithValue("nom", g.Concepto.Trim());
+                        await using var rTar = await cmdTar.ExecuteReaderAsync();
+                        if (await rTar.ReadAsync())
+                        {
+                            var rolSug = rTar.GetString(1);
+                            if (rolEfectivo == AppRoles.Operario && rolSug.Contains("Veterinario", StringComparison.OrdinalIgnoreCase))
+                                return "Acceso denegado: esta labor está asignada exclusivamente al perfil Veterinario.";
+                            var tDb = rTar.GetDecimal(0);
+                            if (tDb > 0) tarifaLaborNio = tDb;
+                        }
+                    }
+
+                    decimal factorJornal = g.HorasOJornal > 0 ? g.HorasOJornal : 1.0m;
+                    decimal montoCordobasInput = esAdmin ? g.MontoCordobas : 0m;
+                    decimal montoDolaresInput = esAdmin ? g.MontoDolares : 0m;
+                    decimal montoNioEfectivo = montoCordobasInput > 0
+                        ? montoCordobasInput
+                        : (montoDolaresInput > 0
+                            ? Math.Round(montoDolaresInput * TasaCambioOficial, 2)
+                            : (esLabor ? Math.Round(tarifaLaborNio * factorJornal, 2) : 0m));
+
+                    decimal montoUsdEfectivo = montoDolaresInput > 0
+                        ? montoDolaresInput
                         : (montoNioEfectivo > 0 ? Math.Round(montoNioEfectivo / TasaCambioOficial, 2) : 0m);
 
                     if (!esLabor && montoUsdEfectivo <= 0)
@@ -3571,6 +3940,7 @@ public class AgroPigDataService
             {
                 await ProcesarAsync(tn.Id, "TAREA", tn, async () =>
                 {
+                    if (!puedeVet) return "Acceso denegado: solo el Veterinario o Administrador puede programar nuevas tareas.";
                     if (string.IsNullOrWhiteSpace(tn.Titulo)) return "Falta el título de la tarea.";
                     var granjaTarea = Guid.Parse("a0000000-0000-0000-0000-000000000001");
                     var tareaGuid = Guid.TryParse(tn.Id, out var parsedGuid) ? parsedGuid : Guid.NewGuid();
@@ -3601,24 +3971,34 @@ public class AgroPigDataService
             }
         }
 
+        if (savedIds.Count > 0)
+            InvalidarCachesOperativos();
+
         return savedIds;
     }
 
-    // Catálogo mínimo que la app necesita para trabajar sin escribir a mano (todo viene de la BD)
-    public async Task<MovilCatalogo> ObtenerCatalogoMovilAsync()
+    // Catálogo completo (todo viene de PostgreSQL para que Web y App trabajen mediante selectores sin texto libre)
+    public async Task<MovilCatalogo> ObtenerCatalogoMovilAsync(Guid? usuarioId = null, string? rolUsuario = null, string? nombreUsuario = null)
     {
         await EnsureBaseEntitiesAsync();
+        var rol = ResolveRole(rolUsuario);
+        var usuarioNom = ResolveUserName(nombreUsuario);
+        bool esAdmin = rol == AppRoles.Administrador;
+        bool esVet = rol == AppRoles.Veterinario;
+        bool esOp = rol == AppRoles.Operario;
+
         var cat = new MovilCatalogo { GeneradoEn = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
         await using var conn = CreateConnection();
         await conn.OpenAsync();
 
-        await using (var cmd = new NpgsqlCommand(@"
-            SELECT c.caravana, c.estado_fisiologico, COALESCE(c.jaula_numero, ''), COALESCE(g.nombre, ''), c.paridad_acumulada
-            FROM cerdas_reproductoras c
-            LEFT JOIN galpones_naves g ON g.id = c.galpon_id
-            ORDER BY c.caravana;", conn))
-        await using (var r = await cmd.ExecuteReaderAsync())
+        if (esAdmin || esVet)
         {
+            await using var cmd = new NpgsqlCommand(@"
+                SELECT c.caravana, c.estado_fisiologico, COALESCE(c.jaula_numero, ''), COALESCE(g.nombre, ''), c.paridad_acumulada
+                FROM cerdas_reproductoras c
+                LEFT JOIN galpones_naves g ON g.id = c.galpon_id
+                ORDER BY c.caravana;", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 cat.Cerdas.Add(new MovilCerda(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetInt32(4)));
         }
@@ -3636,8 +4016,31 @@ public class AgroPigDataService
             while (await r.ReadAsync())
                 destino.Add(new MovilInsumo(r.GetString(0), r.GetString(1), r.GetDecimal(2)));
         }
-        await LeerInsumosAsync(new[] { "MED" }, cat.Medicamentos);
+        if (esAdmin || esVet)
+            await LeerInsumosAsync(new[] { "MED" }, cat.Medicamentos);
         await LeerInsumosAsync(new[] { "ALIM", "PRE" }, cat.Alimentos);
+
+        // Detalle de insumos filtrado por rol (Operario: sin MED ni costos; Vet: con MED sin costos; Admin: completo)
+        try
+        {
+            var catSqlFilter = esOp ? " AND c.codigo IN ('ALIM', 'PRE', 'BIO') " : "";
+            await using var cmdInsDet = new NpgsqlCommand($@"
+                SELECT i.id::text, i.codigo_sku, i.nombre, c.codigo, i.unidad_medida,
+                       i.stock_actual, i.stock_minimo_seguridad, i.costo_unitario_promedio_usd, COALESCE(s.codigo, '')
+                FROM insumos_catalogo i
+                JOIN categorias_insumos c ON c.id = i.categoria_id
+                LEFT JOIN silos_depositos s ON s.id = i.silo_deposito_id
+                WHERE i.activo = TRUE {catSqlFilter}
+                ORDER BY c.codigo, i.nombre;", conn);
+            await using var rDet = await cmdInsDet.ExecuteReaderAsync();
+            while (await rDet.ReadAsync())
+            {
+                cat.InsumosDetalle.Add(new CatalogoInsumoDetalleDto(
+                    rDet.GetString(0), rDet.GetString(1), rDet.GetString(2), rDet.GetString(3), rDet.GetString(4),
+                    rDet.GetDecimal(5), rDet.GetDecimal(6), esAdmin ? rDet.GetDecimal(7) : 0m, rDet.GetString(8)));
+            }
+        }
+        catch { /* Resiliente */ }
 
         await using (var cmd = new NpgsqlCommand(@"
             SELECT l.codigo_lote, COALESCE(g.nombre, ''), l.etapa_zootecnica, l.cantidad_actual_cabezas
@@ -3650,6 +4053,60 @@ public class AgroPigDataService
             while (await r.ReadAsync())
                 cat.Lotes.Add(new MovilLote(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3)));
         }
+
+        // Galpones y Naves reales
+        try
+        {
+            await using var cmdGalp = new NpgsqlCommand(@"
+                SELECT codigo, nombre, tipo_sistema, capacidad_cabezas, COALESCE(temperatura_ambiente_celsius, 22.0), COALESCE(humedad_relativa_pct, 60.0)
+                FROM galpones_naves
+                WHERE activo = TRUE
+                ORDER BY codigo;", conn);
+            await using var rG = await cmdGalp.ExecuteReaderAsync();
+            while (await rG.ReadAsync())
+                cat.Galpones.Add(new CatalogoGalponMovilDto(rG.GetString(0), rG.GetString(1), rG.GetString(2), rG.GetInt32(3), rG.GetDecimal(4), rG.GetDecimal(5)));
+        }
+        catch { /* Resiliente */ }
+
+        // Jaulas y Corrales reales vinculados a su galpón
+        try
+        {
+            await using var cmdJau = new NpgsqlCommand(@"
+                SELECT jc.codigo, jc.nombre, COALESCE(gn.codigo, ''), COALESCE(gn.nombre, ''), jc.etapa_zootecnica, jc.capacidad_maxima, jc.ocupacion_actual
+                FROM jaulas_corrales jc
+                LEFT JOIN galpones_naves gn ON gn.id = jc.galpon_id
+                WHERE jc.activo = TRUE
+                ORDER BY COALESCE(gn.codigo, ''), jc.codigo;", conn);
+            await using var rJ = await cmdJau.ExecuteReaderAsync();
+            while (await rJ.ReadAsync())
+                cat.Jaulas.Add(new CatalogoJaulaMovilDto(rJ.GetString(0), rJ.GetString(1), rJ.GetString(2), rJ.GetString(3), rJ.GetString(4), rJ.GetInt32(5), rJ.GetInt32(6)));
+        }
+        catch { /* Resiliente */ }
+
+        // Cerdos individuales activos
+        try
+        {
+            await using var cmdCer = new NpgsqlCommand(@"
+                SELECT ci.id::text, ci.crotal, COALESCE(ci.rfid, ''), ci.sexo, ci.fecha_nacimiento,
+                       ci.peso_actual_kg, ci.etapa_actual, COALESCE(jc.codigo, ''), COALESCE(gn.codigo, ''),
+                       ci.linea_genetica, ci.estatus_sanitario, COALESCE(ci.observaciones, '')
+                FROM cerdos_individuales ci
+                LEFT JOIN jaulas_corrales jc ON jc.id = ci.jaula_corral_id
+                LEFT JOIN galpones_naves gn ON gn.id = COALESCE(ci.galpon_id, jc.galpon_id)
+                WHERE ci.activo = TRUE
+                ORDER BY ci.crotal;", conn);
+            await using var rCer = await cmdCer.ExecuteReaderAsync();
+            while (await rCer.ReadAsync())
+            {
+                var fn = rCer.GetDateTime(4);
+                var fnMs = new DateTimeOffset(DateTime.SpecifyKind(fn.Date, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+                cat.CerdosIndividuales.Add(new CatalogoCerdoMovilDto(
+                    rCer.GetString(0), rCer.GetString(1), rCer.GetString(2), rCer.GetString(3), fnMs,
+                    rCer.GetDecimal(5), rCer.GetString(6), rCer.GetString(7), rCer.GetString(8),
+                    rCer.GetString(9), rCer.GetString(10), rCer.GetString(11)));
+            }
+        }
+        catch { /* Resiliente */ }
 
         // 4. Silos de Alimento con Autonomía Calculada
         try
@@ -3670,15 +4127,23 @@ public class AgroPigDataService
         }
         catch { /* Resiliente */ }
 
-        // 5. Tareas y Actividades Programadas (de hoy y próximos 5 días)
+        // 5. Tareas y Actividades Programadas filtradas por rol (de hoy y próximos 5 días)
         try
         {
-            await using var cmdTareas = new NpgsqlCommand(@"
+            var tareaRoleSql = esOp
+                ? " AND (COALESCE(asignado_a_rol, '') IN ('Operario', 'operario_galpon', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) "
+                : (esVet
+                    ? " AND (COALESCE(asignado_a_rol, '') IN ('Veterinario', 'director_veterinario', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) "
+                    : "");
+            await using var cmdTareas = new NpgsqlCommand($@"
                 SELECT id::text, titulo, COALESCE(descripcion, ''), prioridad, tipo_actividad, estado, 
                        fecha_programada::text, hora_programada, COALESCE(galpon_nombre, ''), COALESCE(lote_codigo, ''), COALESCE(asignado_a_nombre, '')
                 FROM tareas_actividades_granja
                 WHERE fecha_programada BETWEEN CURRENT_DATE - INTERVAL '1 day' AND CURRENT_DATE + INTERVAL '5 days'
+                {tareaRoleSql}
                 ORDER BY fecha_programada ASC, hora_programada ASC;", conn);
+            if (esOp || esVet)
+                cmdTareas.Parameters.AddWithValue("uPat", string.IsNullOrWhiteSpace(usuarioNom) ? "" : $"%{usuarioNom}%");
             await using var rTareas = await cmdTareas.ExecuteReaderAsync();
             while (await rTareas.ReadAsync())
             {
@@ -3690,10 +4155,10 @@ public class AgroPigDataService
         }
         catch { /* Resiliente */ }
 
-        // 6. Notificaciones y Alertas Sanitarias / Operativas Activas
+        // 6. Notificaciones y Alertas Sanitarias / Operativas Activas filtradas por rol
         try
         {
-            var notifs = await GetNotificacionesActivasAsync();
+            var notifs = await GetNotificacionesActivasAsync(rol, usuarioNom);
             foreach (var n in notifs)
             {
                 var ms = new DateTimeOffset(n.FechaHora).ToUnixTimeMilliseconds();
@@ -3704,21 +4169,334 @@ public class AgroPigDataService
         }
         catch { /* Resiliente */ }
 
-        // 7. Verracos y Dosis Seminales Activos
+        // 7. Verracos y Dosis Seminales Activos (Solo Administrador / Veterinario)
+        if (esAdmin || esVet)
+        {
+            try
+            {
+                await using var cmdVer = new NpgsqlCommand(@"
+                    SELECT codigo, nombre
+                    FROM verracos_semen
+                    WHERE activo = true
+                    ORDER BY codigo;", conn);
+                await using var rVer = await cmdVer.ExecuteReaderAsync();
+                while (await rVer.ReadAsync())
+                    cat.Verracos.Add(new MovilVerraco(rVer.GetString(0), rVer.GetString(1)));
+            }
+            catch { /* Resiliente */ }
+        }
+
+        // 8. Labores de Campo y Conceptos de Gasto Operativo (tarifas solo visibles para Admin; Operario solo LABOR_CAMPO de campo)
         try
         {
-            await using var cmdVer = new NpgsqlCommand(@"
-                SELECT codigo, nombre
-                FROM verracos_semen
-                WHERE activo = true
-                ORDER BY codigo;", conn);
-            await using var rVer = await cmdVer.ExecuteReaderAsync();
-            while (await rVer.ReadAsync())
-                cat.Verracos.Add(new MovilVerraco(rVer.GetString(0), rVer.GetString(1)));
+            var laborFilterSql = esOp
+                ? " AND tipo_registro = 'LABOR_CAMPO' AND COALESCE(rol_sugerido, 'Operario') NOT ILIKE 'Veterinario' "
+                : (esVet ? " AND tipo_registro = 'LABOR_CAMPO' " : "");
+            await using var cmdLab = new NpgsqlCommand($@"
+                SELECT codigo, nombre, tipo_registro, categoria, COALESCE(etapa_sugerida, ''), COALESCE(galpon_sugerido, ''),
+                       COALESCE(duracion_sugerida, ''), tarifa_referencia_nio, COALESCE(centro_costo_codigo, ''), COALESCE(rol_sugerido, 'Operario'), requiere_insumo
+                FROM catalogo_labores_campo
+                WHERE activo = TRUE {laborFilterSql}
+                ORDER BY orden, nombre;", conn);
+            await using var rLab = await cmdLab.ExecuteReaderAsync();
+            while (await rLab.ReadAsync())
+            {
+                cat.Labores.Add(new CatalogoLaborMovilDto(
+                    rLab.GetString(0), rLab.GetString(1), rLab.GetString(2), rLab.GetString(3),
+                    rLab.GetString(4), rLab.GetString(5), rLab.GetString(6),
+                    esAdmin ? rLab.GetDecimal(7) : 0m,
+                    rLab.GetString(8), rLab.GetString(9), rLab.GetBoolean(10)));
+            }
         }
         catch { /* Resiliente */ }
 
+        // 9. Horarios, Turnos, Tomas de Alimento, Dosis IA y Plantillas de Agenda
+        try
+        {
+            var horarioFilterSql = esOp ? " AND tipo_horario <> 'DOSIS_IA' " : "";
+            await using var cmdHor = new NpgsqlCommand($@"
+                SELECT codigo, nombre, tipo_horario, hora_inicio, COALESCE(hora_fin, ''),
+                       COALESCE(categoria_actividad, ''), COALESCE(etapa_aplicable, ''),
+                       COALESCE(rol_responsable, 'Operario'), prioridad_default, COALESCE(descripcion, '')
+                FROM catalogo_horarios_turnos
+                WHERE activo = TRUE {horarioFilterSql}
+                ORDER BY orden, hora_inicio;", conn);
+            await using var rHor = await cmdHor.ExecuteReaderAsync();
+            while (await rHor.ReadAsync())
+            {
+                cat.Horarios.Add(new CatalogoHorarioMovilDto(
+                    rHor.GetString(0), rHor.GetString(1), rHor.GetString(2), rHor.GetString(3), rHor.GetString(4),
+                    rHor.GetString(5), rHor.GetString(6), rHor.GetString(7), rHor.GetString(8), rHor.GetString(9)));
+            }
+        }
+        catch { /* Resiliente */ }
+
+        // 10. Operarios y Responsables activos
+        try
+        {
+            await using var cmdOp = new NpgsqlCommand(@"
+                SELECT id::text, COALESCE(nombre_usuario, ''), nombre, rol, COALESCE(matricula_profesional, '')
+                FROM usuarios_operadores
+                WHERE activo = TRUE
+                ORDER BY rol, nombre;", conn);
+            await using var rOp = await cmdOp.ExecuteReaderAsync();
+            while (await rOp.ReadAsync())
+                cat.Operarios.Add(new CatalogoOperarioMovilDto(rOp.GetString(0), rOp.GetString(1), rOp.GetString(2), AppRoles.Normalizar(rOp.GetString(3)) ?? rOp.GetString(3), rOp.GetString(4)));
+        }
+        catch { /* Resiliente */ }
+
+        // 11. Catálogos Clínicos / Sanitarios / Etapas / Causas Mortalidad (Operario solo etapas productivas)
+        try
+        {
+            var clinFilterSql = esOp ? " AND tipo_catalogo = 'ETAPA_PRODUCTIVA' " : "";
+            await using var cmdCli = new NpgsqlCommand($@"
+                SELECT codigo, tipo_catalogo, nombre, COALESCE(subcategoria, ''), dias_retiro_referencia
+                FROM catalogo_clinico_sanitario
+                WHERE activo = TRUE {clinFilterSql}
+                ORDER BY tipo_catalogo, orden, nombre;", conn);
+            await using var rCli = await cmdCli.ExecuteReaderAsync();
+            while (await rCli.ReadAsync())
+                cat.CatalogosClinicos.Add(new CatalogoClinicoMovilDto(rCli.GetString(0), rCli.GetString(1), rCli.GetString(2), rCli.GetString(3), rCli.GetInt32(4)));
+        }
+        catch { /* Resiliente */ }
+
+        // 12. Líneas Genéticas
+        try
+        {
+            await using var cmdGen = new NpgsqlCommand("SELECT nombre FROM lineas_geneticas ORDER BY nombre;", conn);
+            await using var rGen = await cmdGen.ExecuteReaderAsync();
+            while (await rGen.ReadAsync())
+                cat.LineasGeneticas.Add(rGen.GetString(0));
+        }
+        catch { /* Resiliente */ }
+
+        // 13. Preferencias de Interfaz Personalizable según Usuario / Rol
+        cat.PreferenciasUi = await ObtenerPreferenciasUiUsuarioAsync(usuarioId, rolUsuario);
+
         return cat;
+    }
+
+    public static PreferenciasUiUsuarioDto BuildDefaultUiPreferences(string? rolRaw)
+    {
+        var rol = AppRoles.Normalizar(rolRaw) ?? AppRoles.Operario;
+        return rol switch
+        {
+            AppRoles.Administrador => new PreferenciasUiUsuarioDto
+            {
+                RolBase = AppRoles.Administrador,
+                ModulosVisibles = new() { "ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO", "RESUMEN_FINANCIERO" },
+                AccionesRapidas = new() { "FEED_SUPPLY", "REPRODUCTIVE_EVENT", "TREATMENT", "FIELD_OPERATIONS" },
+                NavInferior = new() { "DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE" },
+                GalponPredeterminado = "",
+                TurnoPredeterminado = "TUR-COMP",
+                MonedaPreferida = "NIO",
+                ModoCompacto = false
+            },
+            AppRoles.Veterinario => new PreferenciasUiUsuarioDto
+            {
+                RolBase = AppRoles.Veterinario,
+                ModulosVisibles = new() { "ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO" },
+                AccionesRapidas = new() { "TREATMENT", "REPRODUCTIVE_EVENT", "MORTALITY", "TASKS_SCHEDULE" },
+                NavInferior = new() { "DASHBOARD", "TREATMENT", "REPRODUCTIVE_EVENT", "TASKS_SCHEDULE" },
+                GalponPredeterminado = "GALP-01",
+                TurnoPredeterminado = "TUR-COMP",
+                MonedaPreferida = "NIO",
+                ModoCompacto = false
+            },
+            _ => new PreferenciasUiUsuarioDto
+            {
+                RolBase = AppRoles.Operario,
+                ModulosVisibles = new() { "ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO" },
+                AccionesRapidas = new() { "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "ANIMALS" },
+                NavInferior = new() { "DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE" },
+                GalponPredeterminado = "",
+                TurnoPredeterminado = "TUR-MAN",
+                MonedaPreferida = "NIO",
+                ModoCompacto = false
+            }
+        };
+    }
+
+    private static PreferenciasUiUsuarioDto SanitizeUiPreferences(string? rolRaw, PreferenciasUiUsuarioDto input)
+    {
+        var rol = AppRoles.Normalizar(rolRaw) ?? AppRoles.Operario;
+        var def = BuildDefaultUiPreferences(rol);
+
+        var allowedModulos = rol == AppRoles.Administrador
+            ? new HashSet<string> { "ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO", "RESUMEN_FINANCIERO" }
+            : new HashSet<string> { "ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO" };
+
+        var allowedActions = rol switch
+        {
+            AppRoles.Administrador => new HashSet<string> { "FEED_SUPPLY", "REPRODUCTIVE_EVENT", "TREATMENT", "FIELD_OPERATIONS", "ANIMALS", "TASKS_SCHEDULE", "MORTALITY" },
+            AppRoles.Veterinario => new HashSet<string> { "TREATMENT", "REPRODUCTIVE_EVENT", "MORTALITY", "TASKS_SCHEDULE", "ANIMALS", "FIELD_OPERATIONS" },
+            _ => new HashSet<string> { "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "ANIMALS" }
+        };
+
+        var allowedNav = rol switch
+        {
+            AppRoles.Administrador => new HashSet<string> { "DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "TREATMENT", "ANIMALS", "REPRODUCTIVE_EVENT" },
+            AppRoles.Veterinario => new HashSet<string> { "DASHBOARD", "TREATMENT", "REPRODUCTIVE_EVENT", "TASKS_SCHEDULE", "ANIMALS", "MORTALITY" },
+            _ => new HashSet<string> { "DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "ANIMALS" }
+        };
+
+        var modulos = (input.ModulosVisibles ?? new()).Where(allowedModulos.Contains).Distinct().ToList();
+        if (modulos.Count == 0) modulos = def.ModulosVisibles;
+
+        var acciones = (input.AccionesRapidas ?? new()).Where(allowedActions.Contains).Distinct().Take(4).ToList();
+        if (acciones.Count < 4)
+        {
+            foreach (var fallback in def.AccionesRapidas)
+                if (!acciones.Contains(fallback) && acciones.Count < 4) acciones.Add(fallback);
+        }
+
+        var nav = (input.NavInferior ?? new()).Where(allowedNav.Contains).Distinct().Take(4).ToList();
+        if (!nav.Contains("DASHBOARD"))
+        {
+            nav.Insert(0, "DASHBOARD");
+            nav = nav.Take(4).ToList();
+        }
+        if (nav.Count < 4)
+        {
+            foreach (var fallback in def.NavInferior)
+                if (!nav.Contains(fallback) && nav.Count < 4) nav.Add(fallback);
+        }
+
+        var moneda = (rol == AppRoles.Administrador && string.Equals(input.MonedaPreferida, "USD", StringComparison.OrdinalIgnoreCase))
+            ? "USD"
+            : "NIO";
+
+        return new PreferenciasUiUsuarioDto
+        {
+            RolBase = rol,
+            ModulosVisibles = modulos,
+            AccionesRapidas = acciones,
+            NavInferior = nav,
+            GalponPredeterminado = (input.GalponPredeterminado ?? "").Trim(),
+            TurnoPredeterminado = string.IsNullOrWhiteSpace(input.TurnoPredeterminado) ? def.TurnoPredeterminado : input.TurnoPredeterminado.Trim(),
+            MonedaPreferida = moneda,
+            ModoCompacto = input.ModoCompacto,
+            UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+    }
+
+    public async Task<PreferenciasUiUsuarioDto> ObtenerPreferenciasUiUsuarioAsync(Guid? usuarioId, string? rolRaw)
+    {
+        await EnsureBaseEntitiesAsync();
+        var rol = AppRoles.Normalizar(rolRaw) ?? AppRoles.Operario;
+        var fallback = BuildDefaultUiPreferences(rol);
+        if (!usuarioId.HasValue || usuarioId.Value == Guid.Empty) return fallback;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(@"
+                SELECT modulos_visibles_json::text, acciones_rapidas_json::text, nav_inferior_json::text,
+                       COALESCE(galpon_predeterminado, ''), COALESCE(turno_predeterminado, ''),
+                       COALESCE(moneda_preferida, 'NIO'), modo_compacto, updated_at
+                FROM preferencias_ui_usuario
+                WHERE usuario_id = @uid;", conn);
+            cmd.Parameters.AddWithValue("uid", usuarioId.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return fallback;
+
+            var dto = new PreferenciasUiUsuarioDto
+            {
+                RolBase = rol,
+                ModulosVisibles = JsonSerializer.Deserialize<List<string>>(r.GetString(0)) ?? fallback.ModulosVisibles,
+                AccionesRapidas = JsonSerializer.Deserialize<List<string>>(r.GetString(1)) ?? fallback.AccionesRapidas,
+                NavInferior = JsonSerializer.Deserialize<List<string>>(r.GetString(2)) ?? fallback.NavInferior,
+                GalponPredeterminado = r.GetString(3),
+                TurnoPredeterminado = r.GetString(4),
+                MonedaPreferida = r.GetString(5),
+                ModoCompacto = r.GetBoolean(6),
+                UpdatedAtMs = new DateTimeOffset(r.GetDateTime(7)).ToUnixTimeMilliseconds()
+            };
+            return SanitizeUiPreferences(rol, dto);
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    public async Task<PreferenciasUiUsuarioDto> GuardarPreferenciasUiUsuarioAsync(Guid usuarioId, string? rolRaw, PreferenciasUiUsuarioDto input)
+    {
+        await EnsureBaseEntitiesAsync();
+        var clean = SanitizeUiPreferences(rolRaw, input);
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            INSERT INTO preferencias_ui_usuario (
+                usuario_id, rol_base, modulos_visibles_json, acciones_rapidas_json, nav_inferior_json,
+                galpon_predeterminado, turno_predeterminado, moneda_preferida, modo_compacto, updated_at
+            ) VALUES (
+                @uid, @rol, @modulos::jsonb, @acciones::jsonb, @nav::jsonb,
+                @galpon, @turno, @moneda, @compacto, NOW()
+            )
+            ON CONFLICT (usuario_id) DO UPDATE SET
+                rol_base = EXCLUDED.rol_base,
+                modulos_visibles_json = EXCLUDED.modulos_visibles_json,
+                acciones_rapidas_json = EXCLUDED.acciones_rapidas_json,
+                nav_inferior_json = EXCLUDED.nav_inferior_json,
+                galpon_predeterminado = EXCLUDED.galpon_predeterminado,
+                turno_predeterminado = EXCLUDED.turno_predeterminado,
+                moneda_preferida = EXCLUDED.moneda_preferida,
+                modo_compacto = EXCLUDED.modo_compacto,
+                updated_at = NOW();", conn);
+
+        cmd.Parameters.AddWithValue("uid", usuarioId);
+        cmd.Parameters.AddWithValue("rol", clean.RolBase);
+        cmd.Parameters.AddWithValue("modulos", JsonSerializer.Serialize(clean.ModulosVisibles));
+        cmd.Parameters.AddWithValue("acciones", JsonSerializer.Serialize(clean.AccionesRapidas));
+        cmd.Parameters.AddWithValue("nav", JsonSerializer.Serialize(clean.NavInferior));
+        cmd.Parameters.AddWithValue("galpon", (object?)clean.GalponPredeterminado ?? "");
+        cmd.Parameters.AddWithValue("turno", (object?)clean.TurnoPredeterminado ?? "");
+        cmd.Parameters.AddWithValue("moneda", clean.MonedaPreferida);
+        cmd.Parameters.AddWithValue("compacto", clean.ModoCompacto);
+        await cmd.ExecuteNonQueryAsync();
+        InvalidarCachesOperativos();
+        return clean;
+    }
+
+    public async Task<CatalogosFormularioWebViewModel> GetCatalogosFormularioWebAsync()
+    {
+        var cat = await ObtenerCatalogoMovilAsync(CurrentUserId, _http.HttpContext?.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value);
+        var vm = new CatalogosFormularioWebViewModel
+        {
+            Labores = cat.Labores.Where(l => l.TipoRegistro == "LABOR_CAMPO").ToList(),
+            GastosConceptos = cat.Labores.Where(l => l.TipoRegistro == "GASTO_OPERATIVO").ToList(),
+            Horarios = cat.Horarios,
+            PlantillasAgenda = cat.Horarios.Where(h => h.TipoHorario == "PLANTILLA_AGENDA").ToList(),
+            TurnosJornada = cat.Horarios.Where(h => h.TipoHorario == "TURNO_JORNADA").ToList(),
+            DosisIaHorarios = cat.Horarios.Where(h => h.TipoHorario == "DOSIS_IA").ToList(),
+            CausasMortalidad = cat.CatalogosClinicos.Where(c => c.TipoCatalogo == "CAUSA_MORTALIDAD").ToList(),
+            Diagnosticos = cat.CatalogosClinicos.Where(c => c.TipoCatalogo == "DIAGNOSTICO_CLINICO").ToList(),
+            ViasAdministracion = cat.CatalogosClinicos.Where(c => c.TipoCatalogo == "VIA_ADMINISTRACION").ToList(),
+            TecnicasIa = cat.CatalogosClinicos.Where(c => c.TipoCatalogo == "TECNICA_IA").ToList(),
+            LineasGeneticas = cat.LineasGeneticas,
+            Galpones = cat.Galpones,
+            Jaulas = cat.Jaulas,
+            Operadores = cat.Operarios,
+            Insumos = cat.InsumosDetalle,
+            Silos = cat.Silos,
+            Lotes = cat.Lotes
+        };
+
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmdPrv = new NpgsqlCommand("SELECT nombre_comercial FROM proveedores WHERE activo = TRUE ORDER BY nombre_comercial;", conn);
+            await using var rPrv = await cmdPrv.ExecuteReaderAsync();
+            while (await rPrv.ReadAsync())
+                vm.Proveedores.Add(rPrv.GetString(0));
+        }
+        catch { /* Resiliente */ }
+
+        return vm;
     }
 
 
@@ -4276,6 +5054,7 @@ public class AgroPigDataService
             await cmdOcup.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -4302,6 +5081,7 @@ public class AgroPigDataService
             await cmdOcup.ExecuteNonQueryAsync();
         }
 
+        InvalidarCachesOperativos();
         return true;
     }
 
@@ -4356,27 +5136,46 @@ public class AgroPigDataService
         cmd.Parameters.Add(new NpgsqlParameter("fecha", NpgsqlTypes.NpgsqlDbType.TimestampTz) { Value = (object?)input.FechaBaja ?? DBNull.Value });
 
         await cmd.ExecuteNonQueryAsync();
+        InvalidarCachesOperativos();
         return true;
     }
 
-    public async Task<List<NotificacionCentroItem>> GetNotificacionesActivasAsync()
+    public async Task<List<NotificacionCentroItem>> GetNotificacionesActivasAsync(string? rolRaw = null, string? nombreUsuario = null)
     {
         await EnsureBaseEntitiesAsync();
-        var list = new List<NotificacionCentroItem>();
-        await using var conn = CreateConnection();
-        await conn.OpenAsync();
+        var rol = ResolveRole(rolRaw);
+        var usuarioNom = ResolveUserName(nombreUsuario);
+        bool esAdmin = rol == AppRoles.Administrador;
+        bool esVet = rol == AppRoles.Veterinario;
+        bool esOp = rol == AppRoles.Operario;
 
-        // 1. Alertas operativas abiertas
-        try
+        // Deduplicación intra-petición (_Layout + PageModel comparten la misma consulta sin tocar BD dos veces)
+        var reqKey = $"agropig:req_notif:{rol}:{usuarioNom}";
+        if (_http.HttpContext?.Items.TryGetValue(reqKey, out var cachedReq) == true && cachedReq is List<NotificacionCentroItem> reqList)
+            return reqList;
+
+        var list = await _cache.GetOrCreateAsync(CacheKey("notif", rol, usuarioNom), async entry =>
         {
-            string sqlAlertas = @"
-                SELECT id, tipo_alerta, nivel_severidad, descripcion, fecha_deteccion, estado
-                FROM alertas_operativas_desviaciones
-                WHERE estado = 'abierta'
-                ORDER BY fecha_deteccion DESC LIMIT 10;";
-            await using (var cmd = new NpgsqlCommand(sqlAlertas, conn))
-            await using (var reader = await cmd.ExecuteReaderAsync())
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30);
+            var items = new List<NotificacionCentroItem>();
+
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+
+            // 1. Alertas operativas abiertas filtradas por rol en SQL
+            try
             {
+                var alertaSqlFilter = esOp
+                    ? " AND tipo_alerta NOT IN ('desviacion_financiera', 'protocolo_sanitario', 'mortalidad_anormal') "
+                    : (esVet ? " AND tipo_alerta <> 'desviacion_financiera' " : "");
+                string sqlAlertas = $@"
+                    SELECT id, tipo_alerta, nivel_severidad, descripcion, fecha_deteccion, estado
+                    FROM alertas_operativas_desviaciones
+                    WHERE estado = 'abierta'
+                    {alertaSqlFilter}
+                    ORDER BY fecha_deteccion DESC LIMIT 10;";
+                await using var cmd = new NpgsqlCommand(sqlAlertas, conn);
+                await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
                     var tipo = reader.GetString(1);
@@ -4390,7 +5189,7 @@ public class AgroPigDataService
                         _ => "Alerta Operativa"
                     };
 
-                    list.Add(new NotificacionCentroItem
+                    items.Add(new NotificacionCentroItem
                     {
                         Id = reader.GetGuid(0),
                         Titulo = titulo,
@@ -4399,102 +5198,131 @@ public class AgroPigDataService
                         Severidad = reader.GetString(2),
                         FechaHora = reader.GetDateTime(4),
                         Leida = false,
-                        UrlDestino = tipo switch {
+                        UrlDestino = tipo switch
+                        {
                             "protocolo_sanitario" => "/Calendario",
                             "desviacion_financiera" => "/Presupuestos",
+                            "mortalidad_anormal" => "/Cerdos",
+                            "sobreconsumo_alimento" => "/Inventario",
                             _ => "/"
                         }
                     });
                 }
             }
-        }
-        catch { /* Resiliente */ }
+            catch { /* Resiliente */ }
 
-        // 2. Partos inminentes (< 48 hrs o retrasados)
-        try
-        {
-            string sqlPartos = @"
-                SELECT s.id, c.caravana, s.fecha_parto_estimada, COALESCE(c.jaula_numero, 'Sin jaula')
-                FROM servicios_inseminacion s
-                JOIN cerdas_reproductoras c ON s.cerda_id = c.id
-                WHERE s.resultado_concepcion = 'confirmada_positiva' 
-                  AND s.fecha_parto_estimada <= CURRENT_DATE + INTERVAL '2 days'
-                  AND NOT EXISTS (SELECT 1 FROM partos p WHERE p.cerda_id = s.cerda_id AND p.fecha_hora >= s.fecha_servicio)
-                ORDER BY s.fecha_parto_estimada ASC LIMIT 5;";
-            await using var cmdPartos = new NpgsqlCommand(sqlPartos, conn);
-            await using var rPartos = await cmdPartos.ExecuteReaderAsync();
-            while (await rPartos.ReadAsync())
+            // 2. Partos inminentes (< 48 hrs o retrasados) — solo Administrador y Veterinario
+            if (esAdmin || esVet)
             {
-                var caravana = rPartos.GetString(1);
-                var fep = rPartos.GetDateTime(2);
-                var jaula = rPartos.GetString(3);
-                var diasFaltan = (fep.Date - DateTime.Today).TotalDays;
-
-                string msg = diasFaltan < 0 
-                    ? $"Cerda {caravana} en {jaula}: Fecha de parto sobrepasada por {Math.Abs((int)diasFaltan)} días. Requiere monitoreo veterinario."
-                    : diasFaltan == 0
-                        ? $"Cerda {caravana} en {jaula}: Fecha Estimada de Parto es HOY. Preparar kit de parto y lámpara infrarroja."
-                        : $"Cerda {caravana} en {jaula}: Parto programado para mañana ({fep:dd/MM}). Verificar traslado a maternidad.";
-
-                list.Add(new NotificacionCentroItem
+                try
                 {
-                    Id = Guid.NewGuid(),
-                    Titulo = "Parto Inminente en Maternidad",
-                    Mensaje = msg,
-                    Tipo = "reproduccion",
-                    Severidad = diasFaltan <= 0 ? "critica" : "preventiva",
-                    FechaHora = DateTime.Now,
-                    Leida = false,
-                    UrlDestino = "/Reproduccion"
-                });
-            }
-        }
-        catch { /* Resiliente */ }
+                    string sqlPartos = @"
+                        SELECT s.id, c.caravana, s.fecha_parto_estimada, COALESCE(c.jaula_numero, 'Sin jaula')
+                        FROM servicios_inseminacion s
+                        JOIN cerdas_reproductoras c ON s.cerda_id = c.id
+                        WHERE s.resultado_concepcion = 'confirmada_positiva' 
+                          AND s.fecha_parto_estimada <= CURRENT_DATE + INTERVAL '2 days'
+                          AND NOT EXISTS (SELECT 1 FROM partos p WHERE p.cerda_id = s.cerda_id AND p.fecha_hora >= s.fecha_servicio)
+                        ORDER BY s.fecha_parto_estimada ASC LIMIT 5;";
+                    await using var cmdPartos = new NpgsqlCommand(sqlPartos, conn);
+                    await using var rPartos = await cmdPartos.ExecuteReaderAsync();
+                    while (await rPartos.ReadAsync())
+                    {
+                        var caravana = rPartos.GetString(1);
+                        var fep = rPartos.GetDateTime(2);
+                        var jaula = rPartos.GetString(3);
+                        var diasFaltan = (fep.Date - DateTime.Today).TotalDays;
 
-        // 3. Tareas prioritarias pendientes de hoy
-        try
-        {
-            string sqlTareasUrg = @"
-                SELECT id, titulo, hora_programada, tipo_actividad, COALESCE(galpon_nombre, 'Área General')
-                FROM tareas_actividades_granja
-                WHERE fecha_programada = CURRENT_DATE 
-                  AND estado IN ('pendiente', 'en_progreso')
-                  AND prioridad IN ('urgente', 'alta')
-                ORDER BY hora_programada ASC LIMIT 5;";
-            await using var cmdT = new NpgsqlCommand(sqlTareasUrg, conn);
-            await using var rT = await cmdT.ExecuteReaderAsync();
-            while (await rT.ReadAsync())
+                        string msg = diasFaltan < 0
+                            ? $"Cerda {caravana} en {jaula}: Fecha de parto sobrepasada por {Math.Abs((int)diasFaltan)} días. Requiere monitoreo veterinario."
+                            : diasFaltan == 0
+                                ? $"Cerda {caravana} en {jaula}: Fecha Estimada de Parto es HOY. Preparar kit de parto y lámpara infrarroja."
+                                : $"Cerda {caravana} en {jaula}: Parto programado para mañana ({fep:dd/MM}). Verificar traslado a maternidad.";
+
+                        items.Add(new NotificacionCentroItem
+                        {
+                            Id = Guid.NewGuid(),
+                            Titulo = "Parto Inminente en Maternidad",
+                            Mensaje = msg,
+                            Tipo = "reproduccion",
+                            Severidad = diasFaltan <= 0 ? "critica" : "preventiva",
+                            FechaHora = DateTime.Now,
+                            Leida = false,
+                            UrlDestino = "/Reproduccion"
+                        });
+                    }
+                }
+                catch { /* Resiliente */ }
+            }
+
+            // 3. Tareas prioritarias pendientes de hoy filtradas por rol en SQL
+            try
             {
-                list.Add(new NotificacionCentroItem
+                var tareaSqlFilter = esOp
+                    ? " AND (COALESCE(asignado_a_rol, '') IN ('Operario', 'operario_galpon', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) "
+                    : (esVet
+                        ? " AND (COALESCE(asignado_a_rol, '') IN ('Veterinario', 'director_veterinario', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) "
+                        : "");
+                string sqlTareasUrg = $@"
+                    SELECT id, titulo, hora_programada, tipo_actividad, COALESCE(galpon_nombre, 'Área General')
+                    FROM tareas_actividades_granja
+                    WHERE fecha_programada = CURRENT_DATE 
+                      AND estado IN ('pendiente', 'en_progreso')
+                      AND lower(prioridad) IN ('urgente', 'alta')
+                    {tareaSqlFilter}
+                    ORDER BY hora_programada ASC LIMIT 5;";
+                await using var cmdT = new NpgsqlCommand(sqlTareasUrg, conn);
+                if (esOp || esVet)
+                    cmdT.Parameters.AddWithValue("uPat", string.IsNullOrWhiteSpace(usuarioNom) ? "" : $"%{usuarioNom}%");
+                await using var rT = await cmdT.ExecuteReaderAsync();
+                while (await rT.ReadAsync())
                 {
-                    Id = rT.GetGuid(0),
-                    Titulo = $"Tarea Prioritaria ({rT.GetString(2)})",
-                    Mensaje = $"{rT.GetString(1)} en {rT.GetString(4)}",
-                    Tipo = "tarea",
-                    Severidad = "preventiva",
-                    FechaHora = DateTime.Now,
-                    Leida = false,
-                    UrlDestino = "/Calendario"
-                });
+                    items.Add(new NotificacionCentroItem
+                    {
+                        Id = rT.GetGuid(0),
+                        Titulo = $"Tarea Prioritaria ({rT.GetString(2)})",
+                        Mensaje = $"{rT.GetString(1)} en {rT.GetString(4)}",
+                        Tipo = "tarea",
+                        Severidad = "preventiva",
+                        FechaHora = DateTime.Now,
+                        Leida = false,
+                        UrlDestino = "/Calendario"
+                    });
+                }
             }
-        }
-        catch { /* Resiliente */ }
+            catch { /* Resiliente */ }
+
+            return items;
+        }) ?? new List<NotificacionCentroItem>();
+
+        if (_http.HttpContext != null)
+            _http.HttpContext.Items[reqKey] = list;
 
         return list;
     }
 
-    public async Task<bool> ResolverNotificacionAsync(Guid id)
+    public async Task<bool> ResolverNotificacionAsync(Guid id, string? rolRaw = null)
     {
+        var rol = ResolveRole(rolRaw);
+        bool esVet = rol == AppRoles.Veterinario;
+        bool esOp = rol == AppRoles.Operario;
+
         await using var conn = CreateConnection();
         await conn.OpenAsync();
 
-        await using var cmd = new NpgsqlCommand(@"
+        var alertaSqlFilter = esOp
+            ? " AND tipo_alerta NOT IN ('desviacion_financiera', 'protocolo_sanitario', 'mortalidad_anormal') "
+            : (esVet ? " AND tipo_alerta <> 'desviacion_financiera' " : "");
+
+        await using var cmd = new NpgsqlCommand($@"
             UPDATE alertas_operativas_desviaciones 
             SET estado = 'resuelta', fecha_resolucion = NOW(), resuelto_por_id = @user
-            WHERE id = @id;", conn);
+            WHERE id = @id {alertaSqlFilter};", conn);
         cmd.Parameters.AddWithValue("id", id);
         cmd.Parameters.AddWithValue("user", CurrentUserIdDb);
-        return await cmd.ExecuteNonQueryAsync() > 0;
+        var ok = await cmd.ExecuteNonQueryAsync() > 0;
+        if (ok) InvalidarCachesOperativos();
+        return ok;
     }
 
     public async Task<CalendarioPageViewModel> GetCalendarioPageDataAsync(
@@ -4503,7 +5331,9 @@ public class AgroPigDataService
         int? anio = null, 
         string? tipo = null, 
         string? estado = null, 
-        string? rol = null)
+        string? rol = null,
+        string? rolUsuarioActual = null,
+        string? nombreUsuarioActual = null)
     {
         await EnsureBaseEntitiesAsync();
         var model = new CalendarioPageViewModel();
@@ -4513,7 +5343,32 @@ public class AgroPigDataService
         model.AnioSeleccionado = anio ?? model.FechaSeleccionada.Year;
         model.FiltroTipo = tipo;
         model.FiltroEstado = estado;
-        model.FiltroRol = rol;
+
+        var callerRol = ResolveRole(rolUsuarioActual);
+        var callerName = ResolveUserName(nombreUsuarioActual);
+        bool esOperarioActual = callerRol == AppRoles.Operario;
+
+        // El Operario no puede escalar el filtro a otros roles ni consultar agenda ajena
+        string? filtroRolEfectivo = esOperarioActual ? "Operario" : rol;
+        model.FiltroRol = filtroRolEfectivo;
+
+        var roleSqlFilter = "";
+        string? rolAliasAlt = null;
+        if (esOperarioActual)
+        {
+            roleSqlFilter = " AND (COALESCE(asignado_a_rol, '') IN ('Operario', 'operario_galpon', 'Ambos', '') OR (@uPat <> '' AND asignado_a_nombre ILIKE @uPat)) ";
+        }
+        else if (!string.IsNullOrWhiteSpace(filtroRolEfectivo) && filtroRolEfectivo != "Todos")
+        {
+            rolAliasAlt = filtroRolEfectivo switch
+            {
+                "Veterinario" => AppRoles.Veterinario,
+                "Operario" => AppRoles.Operario,
+                "Administrador" => AppRoles.Administrador,
+                _ => filtroRolEfectivo
+            };
+            roleSqlFilter = " AND (asignado_a_rol ILIKE @rol OR asignado_a_rol ILIKE @rolAlt OR COALESCE(asignado_a_rol, '') IN ('', 'Ambos')) ";
+        }
 
         await using var conn = CreateConnection();
         await conn.OpenAsync();
@@ -4529,10 +5384,9 @@ public class AgroPigDataService
             FROM tareas_actividades_granja
             WHERE fecha_programada = @fecha ";
 
-        if (!string.IsNullOrWhiteSpace(tipo) && tipo != "Todos") sqlDia += " AND tipo_actividad = @tipo ";
+        if (!string.IsNullOrWhiteSpace(tipo) && tipo != "Todos") sqlDia += " AND tipo_actividad ILIKE @tipo ";
         if (!string.IsNullOrWhiteSpace(estado) && estado != "Todos") sqlDia += " AND estado = @estado ";
-        if (!string.IsNullOrWhiteSpace(rol) && rol != "Todos") sqlDia += " AND asignado_a_rol = @rol ";
-
+        sqlDia += roleSqlFilter;
         sqlDia += " ORDER BY hora_programada ASC, prioridad DESC;";
 
         await using (var cmd = new NpgsqlCommand(sqlDia, conn))
@@ -4540,7 +5394,13 @@ public class AgroPigDataService
             cmd.Parameters.AddWithValue("fecha", model.FechaSeleccionada.Date);
             if (!string.IsNullOrWhiteSpace(tipo) && tipo != "Todos") cmd.Parameters.AddWithValue("tipo", tipo);
             if (!string.IsNullOrWhiteSpace(estado) && estado != "Todos") cmd.Parameters.AddWithValue("estado", estado);
-            if (!string.IsNullOrWhiteSpace(rol) && rol != "Todos") cmd.Parameters.AddWithValue("rol", rol);
+            if (esOperarioActual)
+                cmd.Parameters.AddWithValue("uPat", string.IsNullOrWhiteSpace(callerName) ? "" : $"%{callerName}%");
+            else if (!string.IsNullOrWhiteSpace(filtroRolEfectivo) && filtroRolEfectivo != "Todos")
+            {
+                cmd.Parameters.AddWithValue("rol", filtroRolEfectivo);
+                cmd.Parameters.AddWithValue("rolAlt", rolAliasAlt ?? filtroRolEfectivo);
+            }
 
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -4567,7 +5427,7 @@ public class AgroPigDataService
             }
         }
 
-        // 2. Tareas del Mes para la Rejilla de Calendario
+        // 2. Tareas del Mes para la Rejilla de Calendario (mismos filtros por rol y tipo/estado)
         var inicioMes = new DateTime(model.AnioSeleccionado, model.MesSeleccionado, 1);
         var finMes = inicioMes.AddMonths(1).AddDays(-1);
 
@@ -4575,13 +5435,26 @@ public class AgroPigDataService
             SELECT 
                 id, titulo, tipo_actividad, prioridad, estado, fecha_programada, hora_programada
             FROM tareas_actividades_granja
-            WHERE fecha_programada BETWEEN @inicio AND @fin
-            ORDER BY fecha_programada ASC, hora_programada ASC;";
+            WHERE fecha_programada BETWEEN @inicio AND @fin ";
+        if (!string.IsNullOrWhiteSpace(tipo) && tipo != "Todos") sqlMes += " AND tipo_actividad ILIKE @tipo ";
+        if (!string.IsNullOrWhiteSpace(estado) && estado != "Todos") sqlMes += " AND estado = @estado ";
+        sqlMes += roleSqlFilter;
+        sqlMes += " ORDER BY fecha_programada ASC, hora_programada ASC;";
 
         await using (var cmdMes = new NpgsqlCommand(sqlMes, conn))
         {
             cmdMes.Parameters.AddWithValue("inicio", inicioMes);
             cmdMes.Parameters.AddWithValue("fin", finMes);
+            if (!string.IsNullOrWhiteSpace(tipo) && tipo != "Todos") cmdMes.Parameters.AddWithValue("tipo", tipo);
+            if (!string.IsNullOrWhiteSpace(estado) && estado != "Todos") cmdMes.Parameters.AddWithValue("estado", estado);
+            if (esOperarioActual)
+                cmdMes.Parameters.AddWithValue("uPat", string.IsNullOrWhiteSpace(callerName) ? "" : $"%{callerName}%");
+            else if (!string.IsNullOrWhiteSpace(filtroRolEfectivo) && filtroRolEfectivo != "Todos")
+            {
+                cmdMes.Parameters.AddWithValue("rol", filtroRolEfectivo);
+                cmdMes.Parameters.AddWithValue("rolAlt", rolAliasAlt ?? filtroRolEfectivo);
+            }
+
             await using var rMes = await cmdMes.ExecuteReaderAsync();
             while (await rMes.ReadAsync())
             {
@@ -4604,8 +5477,8 @@ public class AgroPigDataService
         model.TareasHoyCompletadas = model.TareasHorarioDia.Count(t => t.EstaCompletada);
         model.TareasUrgentes = model.TareasHorarioDia.Count(t => t.EsUrgente && !t.EstaCompletada);
 
-        // 4. Notificaciones
-        model.Notificaciones = await GetNotificacionesActivasAsync();
+        // 4. Notificaciones reutilizadas desde caché filtrada por rol
+        model.Notificaciones = await GetNotificacionesActivasAsync(callerRol, callerName);
 
         // 5. Selectores para modal de nueva tarea
         await using (var cmdG = new NpgsqlCommand("SELECT nombre FROM galpones_naves WHERE activo = true ORDER BY nombre;", conn))
@@ -4669,7 +5542,9 @@ public class AgroPigDataService
             cmd.Parameters.AddWithValue("asigNom", (object?)input.AsignadoANombre ?? DBNull.Value);
             cmd.Parameters.AddWithValue("asigRol", (object?)input.AsignadoARol ?? DBNull.Value);
             cmd.Parameters.AddWithValue("obs", (object?)input.Observaciones ?? DBNull.Value);
-            return await cmd.ExecuteNonQueryAsync() > 0;
+            var okUp = await cmd.ExecuteNonQueryAsync() > 0;
+            if (okUp) InvalidarCachesOperativos();
+            return okUp;
         }
         else
         {
@@ -4698,7 +5573,9 @@ public class AgroPigDataService
             cmd.Parameters.AddWithValue("asigNom", (object?)input.AsignadoANombre ?? DBNull.Value);
             cmd.Parameters.AddWithValue("asigRol", (object?)input.AsignadoARol ?? DBNull.Value);
             cmd.Parameters.AddWithValue("obs", (object?)input.Observaciones ?? DBNull.Value);
-            return await cmd.ExecuteNonQueryAsync() > 0;
+            var okIn = await cmd.ExecuteNonQueryAsync() > 0;
+            if (okIn) InvalidarCachesOperativos();
+            return okIn;
         }
     }
 
@@ -4721,7 +5598,9 @@ public class AgroPigDataService
         cmd.Parameters.AddWithValue("estado", nuevoEstado);
         cmd.Parameters.AddWithValue("por", (object?)completadoPor ?? DBNull.Value);
         cmd.Parameters.AddWithValue("obs", (object?)observaciones ?? DBNull.Value);
-        return await cmd.ExecuteNonQueryAsync() > 0;
+        var ok = await cmd.ExecuteNonQueryAsync() > 0;
+        if (ok) InvalidarCachesOperativos();
+        return ok;
     }
 
     public async Task<bool> EliminarTareaAsync(Guid id)
@@ -4732,7 +5611,9 @@ public class AgroPigDataService
 
         await using var cmd = new NpgsqlCommand("DELETE FROM tareas_actividades_granja WHERE id = @id;", conn);
         cmd.Parameters.AddWithValue("id", id);
-        return await cmd.ExecuteNonQueryAsync() > 0;
+        var ok = await cmd.ExecuteNonQueryAsync() > 0;
+        if (ok) InvalidarCachesOperativos();
+        return ok;
     }
 
     // =========================================================================
@@ -4826,6 +5707,7 @@ public class AgroPigDataService
         cmd.Parameters.AddWithValue("tel", string.IsNullOrWhiteSpace(input.Telefono) ? (object)DBNull.Value : input.Telefono.Trim());
 
         var rows = await cmd.ExecuteNonQueryAsync();
+        if (rows > 0) InvalidarCachesOperativos();
         return (rows > 0, rows > 0 ? $"Usuario '{username}' creado exitosamente con contraseña inicial '{password}'." : "No se pudo crear el usuario.");
     }
 
@@ -4838,13 +5720,15 @@ public class AgroPigDataService
         string sql = "UPDATE usuarios_operadores SET activo = NOT activo WHERE id = @id;";
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", id);
-        return await cmd.ExecuteNonQueryAsync() > 0;
+        var ok = await cmd.ExecuteNonQueryAsync() > 0;
+        if (ok) InvalidarCachesOperativos();
+        return ok;
     }
 
     // =========================================================================
     // MÓDULO DE COMPRAS, PROVEEDORES, CATÁLOGO Y ÓRDENES CON DESCUENTOS
     // =========================================================================
-    public async Task<ComprasViewModel> GetComprasDataAsync()
+    public async Task<ComprasViewModel> GetComprasDataAsync(bool incluirCostos = true)
     {
         await EnsureBaseEntitiesAsync();
         var vm = new ComprasViewModel();
@@ -5021,8 +5905,44 @@ public class AgroPigDataService
         vm.TotalProveedoresActivos = vm.Proveedores.Count(p => p.Activo);
         vm.TotalProductosCatalogo = vm.ProductosCatalogo.Count(p => p.Activo);
         vm.TotalOrdenesPendientes = vm.OrdenesCompra.Count(o => o.Estado == "emitida" || o.Estado == "borrador");
-        vm.TotalCompradoUsd = vm.OrdenesCompra.Where(o => o.Estado != "cancelada").Sum(o => o.TotalUsd);
-        vm.TotalCompradoNio = vm.OrdenesCompra.Where(o => o.Estado != "cancelada").Sum(o => o.TotalNio);
+        vm.TotalCompradoUsd = incluirCostos ? vm.OrdenesCompra.Where(o => o.Estado != "cancelada").Sum(o => o.TotalUsd) : 0m;
+        vm.TotalCompradoNio = incluirCostos ? vm.OrdenesCompra.Where(o => o.Estado != "cancelada").Sum(o => o.TotalNio) : 0m;
+
+        if (!incluirCostos)
+        {
+            foreach (var prod in vm.ProductosCatalogo)
+            {
+                prod.PrecioUnitarioUsd = 0m;
+                prod.PrecioUnitarioNio = 0m;
+                prod.AplicaDescuento = false;
+                prod.DescuentoPorcentaje = 0m;
+                prod.DescuentoMonetarioUsd = 0m;
+                prod.DescuentoMonetarioNio = 0m;
+                prod.NotasPromocion = "";
+            }
+            foreach (var ord in vm.OrdenesCompra)
+            {
+                ord.SubtotalUsd = 0m;
+                ord.DescuentoUsd = 0m;
+                ord.TotalUsd = 0m;
+                ord.SubtotalNio = 0m;
+                ord.DescuentoNio = 0m;
+                ord.TotalNio = 0m;
+                ord.TasaCambio = 0m;
+                foreach (var det in ord.Detalles)
+                {
+                    det.PrecioUnitarioUsd = 0m;
+                    det.PrecioUnitarioNio = 0m;
+                    det.AplicoDescuento = false;
+                    det.MontoDescuentoUnitarioUsd = 0m;
+                    det.MontoDescuentoLineaUsd = 0m;
+                    det.SubtotalLineaUsd = 0m;
+                    det.TotalLineaUsd = 0m;
+                    det.MontoDescuentoLineaNio = 0m;
+                    det.TotalLineaNio = 0m;
+                }
+            }
+        }
 
         return vm;
     }
@@ -5060,6 +5980,7 @@ public class AgroPigDataService
         cmd.Parameters.AddWithValue("cond", string.IsNullOrWhiteSpace(input.CondicionesPago) ? "Contado" : input.CondicionesPago.Trim());
 
         var ok = await cmd.ExecuteNonQueryAsync() > 0;
+        if (ok) InvalidarCachesOperativos();
         return (ok, ok ? $"Proveedor '{input.NombreComercial}' guardado con éxito." : "Error al registrar el proveedor.");
     }
 
@@ -5113,6 +6034,7 @@ public class AgroPigDataService
         cmd.Parameters.AddWithValue("notas", string.IsNullOrWhiteSpace(input.NotasPromocion) ? (object)DBNull.Value : input.NotasPromocion.Trim());
 
         var ok = await cmd.ExecuteNonQueryAsync() > 0;
+        if (ok) InvalidarCachesOperativos();
         return (ok, ok ? $"Producto '{input.NombreProducto}' agregado al catálogo con éxito." : "Error al registrar el producto.");
     }
 
@@ -5310,6 +6232,7 @@ public class AgroPigDataService
             }
 
             await tx.CommitAsync();
+            InvalidarCachesOperativos();
 
             string mensaje = totalDescUsd > 0 
                 ? $"Orden {numOrden} emitida con éxito. Total: ${totalNetoUsd:N2} USD (C$ {totalNetoNio:N2} NIO), ¡con descuento por volumen aplicado de ${totalDescUsd:N2} USD (C$ {totalDescNio:N2} NIO)!"
@@ -5472,6 +6395,7 @@ public class AgroPigDataService
             }
 
             await tx.CommitAsync();
+            InvalidarCachesOperativos();
             return (true, $"Orden {numOrden} recibida e incorporada al inventario satisfactoriamente ({detalles.Count} renglones ingresados al Kardex).");
         }
         catch (Exception ex)
@@ -5839,6 +6763,17 @@ public class ProyeccionLoteFechaTopeResult
     // Ratios Financieros
     public decimal MargenUtilidadPct => IngresoBrutoTotalNio > 0 ? Math.Round((GananciaNetaTotalNio / IngresoBrutoTotalNio) * 100.0m, 1) : 0;
     public decimal RetornoInversionRoiPct => InversionTotalNio > 0 ? Math.Round((GananciaNetaTotalNio / InversionTotalNio) * 100.0m, 1) : 0;
+
+    /// <summary>Anula todos los montos económicos cuando la proyección es consultada por un rol no administrativo.</summary>
+    public void LimpiarDatosFinancieros()
+    {
+        TipoCambioNioUsd = 0m;
+        PrecioAlimentoQuintalNio = 0m;
+        PrecioVentaLibraPieNio = 0m;
+        CostoManoObraPorCerdoNio = 0m;
+        CostoSanitarioPorCerdoNio = 0m;
+        CostosIndirectosPorCerdoNio = 0m;
+    }
 }
 
 public class GalponItem
@@ -5900,6 +6835,7 @@ public class InsumoDbItem
     public string Sku { get; set; } = "";
     public string Nombre { get; set; } = "";
     public string Categoria { get; set; } = "";
+    public string CategoriaCodigo { get; set; } = "";
     public Guid CategoriaId { get; set; }
     public string Unidad { get; set; } = "";
     public decimal StockActual { get; set; }
@@ -6300,6 +7236,12 @@ public class SyncConsumoAlimentoDto
 
     [System.Text.Json.Serialization.JsonPropertyName("fechaRegistro")]
     public long FechaRegistro { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("siloCodigo")]
+    public string SiloCodigo { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonPropertyName("horarioToma")]
+    public string HorarioToma { get; set; } = "";
 }
 
 public class SyncOperacionGastoDto
@@ -6352,6 +7294,50 @@ public record MovilTarea(string Id, string Titulo, string Descripcion, string Pr
 public record MovilNotificacion(string Id, string Titulo, string Mensaje, string Tipo, string Severidad, long FechaHora, bool Leida);
 public record MovilSilo(string Codigo, string Nombre, decimal CapacidadKg, decimal NivelActualKg, decimal PctOcupacion, string Insumo, int DiasAutonomia);
 
+public record CatalogoGalponMovilDto(string Codigo, string Nombre, string TipoSistema, int Capacidad, decimal TemperaturaC, decimal HumedadPct);
+public record CatalogoJaulaMovilDto(string Codigo, string Nombre, string GalponCodigo, string GalponNombre, string EtapaZootecnica, int CapacidadMaxima, int OcupacionActual);
+public record CatalogoCerdoMovilDto(string Id, string Crotal, string Rfid, string Sexo, long FechaNacimientoMs, decimal PesoKg, string Etapa, string Jaula, string Galpon, string Raza, string EstatusSanitario, string Observaciones);
+public record CatalogoInsumoDetalleDto(string Id, string Sku, string Nombre, string CategoriaCodigo, string UnidadMedida, decimal StockActual, decimal StockMinimo, decimal CostoUnitarioUsd, string SiloCodigo);
+public record CatalogoLaborMovilDto(string Codigo, string Nombre, string TipoRegistro, string Categoria, string EtapaSugerida, string GalponSugerido, string DuracionSugerida, decimal TarifaReferenciaNio, string CentroCostoCodigo, string RolSugerido, bool RequiereInsumo);
+public record CatalogoHorarioMovilDto(string Codigo, string Nombre, string TipoHorario, string HoraInicio, string HoraFin, string CategoriaActividad, string EtapaAplicable, string RolResponsable, string PrioridadDefault, string Descripcion);
+public record CatalogoOperarioMovilDto(string Id, string NombreUsuario, string Nombre, string Rol, string Matricula);
+public record CatalogoClinicoMovilDto(string Codigo, string TipoCatalogo, string Nombre, string Subcategoria, int DiasRetiroReferencia);
+
+public class PreferenciasUiUsuarioDto
+{
+    public string RolBase { get; set; } = AppRoles.Operario;
+    public List<string> ModulosVisibles { get; set; } = new();
+    public List<string> AccionesRapidas { get; set; } = new();
+    public List<string> NavInferior { get; set; } = new();
+    public string GalponPredeterminado { get; set; } = "";
+    public string TurnoPredeterminado { get; set; } = "TUR-MAN";
+    public string MonedaPreferida { get; set; } = "NIO";
+    public bool ModoCompacto { get; set; } = false;
+    public long UpdatedAtMs { get; set; } = 0;
+}
+
+public class CatalogosFormularioWebViewModel
+{
+    public List<CatalogoLaborMovilDto> Labores { get; set; } = new();
+    public List<CatalogoLaborMovilDto> GastosConceptos { get; set; } = new();
+    public List<CatalogoHorarioMovilDto> Horarios { get; set; } = new();
+    public List<CatalogoHorarioMovilDto> PlantillasAgenda { get; set; } = new();
+    public List<CatalogoHorarioMovilDto> TurnosJornada { get; set; } = new();
+    public List<CatalogoHorarioMovilDto> DosisIaHorarios { get; set; } = new();
+    public List<CatalogoClinicoMovilDto> CausasMortalidad { get; set; } = new();
+    public List<CatalogoClinicoMovilDto> Diagnosticos { get; set; } = new();
+    public List<CatalogoClinicoMovilDto> ViasAdministracion { get; set; } = new();
+    public List<CatalogoClinicoMovilDto> TecnicasIa { get; set; } = new();
+    public List<string> LineasGeneticas { get; set; } = new();
+    public List<CatalogoGalponMovilDto> Galpones { get; set; } = new();
+    public List<CatalogoJaulaMovilDto> Jaulas { get; set; } = new();
+    public List<CatalogoOperarioMovilDto> Operadores { get; set; } = new();
+    public List<CatalogoInsumoDetalleDto> Insumos { get; set; } = new();
+    public List<MovilSilo> Silos { get; set; } = new();
+    public List<MovilLote> Lotes { get; set; } = new();
+    public List<string> Proveedores { get; set; } = new();
+}
+
 public class MovilCatalogo
 {
     public long GeneradoEn { get; set; }
@@ -6363,6 +7349,18 @@ public class MovilCatalogo
     public List<MovilSilo> Silos { get; set; } = new();
     public List<MovilTarea> Tareas { get; set; } = new();
     public List<MovilNotificacion> Notificaciones { get; set; } = new();
+
+    // Catálogos maestros completos consultados desde PostgreSQL
+    public List<CatalogoGalponMovilDto> Galpones { get; set; } = new();
+    public List<CatalogoJaulaMovilDto> Jaulas { get; set; } = new();
+    public List<CatalogoCerdoMovilDto> CerdosIndividuales { get; set; } = new();
+    public List<CatalogoInsumoDetalleDto> InsumosDetalle { get; set; } = new();
+    public List<CatalogoLaborMovilDto> Labores { get; set; } = new();
+    public List<CatalogoHorarioMovilDto> Horarios { get; set; } = new();
+    public List<CatalogoOperarioMovilDto> Operarios { get; set; } = new();
+    public List<CatalogoClinicoMovilDto> CatalogosClinicos { get; set; } = new();
+    public List<string> LineasGeneticas { get; set; } = new();
+    public PreferenciasUiUsuarioDto PreferenciasUi { get; set; } = new();
 }
 
 // =========================================================================

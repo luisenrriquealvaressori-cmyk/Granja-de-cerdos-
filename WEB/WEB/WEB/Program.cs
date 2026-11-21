@@ -43,6 +43,7 @@ if (args.Contains("--reset-db"))
 builder.Services.AddRazorPages()
     .AddMvcOptions(o => o.Filters.Add<PoliticaPageFilter>());
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddMemoryCache();
 builder.Services.AddDataProtection()
     .SetApplicationName("AgroPig.Web");
 builder.Services.AddSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository, PostgresDataProtectionRepository>();
@@ -297,7 +298,8 @@ app.MapPost("/api/v1/sync/batch", async (WEB.Services.SyncBatchRequest request, 
         request,
         rechazados,
         user.FindFirstValue(ClaimTypes.Name),
-        user.FindFirstValue(CustomClaims.Matricula));
+        user.FindFirstValue(CustomClaims.Matricula),
+        user.FindFirstValue(ClaimTypes.Role));
     return Results.Ok(new
     {
         status = rechazados.Count == 0 ? "success" : "partial",
@@ -313,9 +315,42 @@ app.MapPost("/api/v1/sync/batch", async (WEB.Services.SyncBatchRequest request, 
 }).RequireAuthorization(Policies.SincronizacionMovil);
 
 // Catálogo (cerdas, medicamentos, alimentos, lotes activos) para trabajar en campo sin teclear nombres
-app.MapGet("/api/v1/movil/catalogo", async (WEB.Services.AgroPigDataService dataService) =>
-    Results.Ok(await dataService.ObtenerCatalogoMovilAsync()))
+app.MapGet("/api/v1/movil/catalogo", async (System.Security.Claims.ClaimsPrincipal user, WEB.Services.AgroPigDataService dataService) =>
+{
+    var userId = user.GetUserId();
+    var rol = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    return Results.Ok(await dataService.ObtenerCatalogoMovilAsync(userId, rol, user.FindFirstValue(ClaimTypes.Name)));
+})
     .RequireAuthorization(Policies.SincronizacionMovil);
+
+// Preferencias de interfaz personalizable según rol (móvil y web)
+app.MapGet("/api/v1/movil/preferencias-ui", async (System.Security.Claims.ClaimsPrincipal user, WEB.Services.AgroPigDataService dataService) =>
+{
+    var userId = user.GetUserId();
+    var rol = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    return Results.Ok(await dataService.ObtenerPreferenciasUiUsuarioAsync(userId, rol));
+})
+    .RequireAuthorization(Policies.SincronizacionMovil);
+
+app.MapPut("/api/v1/movil/preferencias-ui", async (WEB.Services.PreferenciasUiUsuarioDto dto, System.Security.Claims.ClaimsPrincipal user, WEB.Services.AgroPigDataService dataService) =>
+{
+    var userId = user.GetUserId();
+    if (!userId.HasValue) return Results.Unauthorized();
+    var rol = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var saved = await dataService.GuardarPreferenciasUiUsuarioAsync(userId.Value, rol, dto);
+    return Results.Ok(saved);
+})
+    .RequireAuthorization(Policies.SincronizacionMovil);
+
+app.MapPost("/api/v1/preferencias-ui", async (WEB.Services.PreferenciasUiUsuarioDto dto, System.Security.Claims.ClaimsPrincipal user, WEB.Services.AgroPigDataService dataService) =>
+{
+    var userId = user.GetUserId();
+    if (!userId.HasValue) return Results.Unauthorized();
+    var rol = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var saved = await dataService.GuardarPreferenciasUiUsuarioAsync(userId.Value, rol, dto);
+    return Results.Ok(saved);
+})
+    .RequireAuthorization();
 
 // Comprobación de disponibilidad (sin datos internos)
 app.MapGet("/api/v1/sync/status", () => Results.Ok(new { status = "online" })).AllowAnonymous();
@@ -382,12 +417,21 @@ app.MapGet("/api/v1/lotes/proyeccion-fecha-tope", async (
     decimal? costoSanitarioCerdo,
     decimal? costosIndirectosCerdo,
     decimal? tipoCambio, 
+    ClaimsPrincipal user,
     WEB.Services.AgroPigDataService dataService) =>
 {
+    var esAdmin = user.Identity?.IsAuthenticated == true
+        && AppRoles.Normalizar(user.FindFirstValue(ClaimTypes.Role)) == AppRoles.Administrador;
     var proyeccion = await dataService.CalcularProyeccionLoteFechaTopeAsync(
         loteId, cabezas, pesoLbs, fechaTope, gmdLbs, consumoDiarioLbs, 
-        precioAlimentoQq, precioVentaLb, costoManoObraCerdo, costoSanitarioCerdo, 
-        costosIndirectosCerdo, tipoCambio);
+        esAdmin ? precioAlimentoQq : null,
+        esAdmin ? precioVentaLb : null,
+        esAdmin ? costoManoObraCerdo : null,
+        esAdmin ? costoSanitarioCerdo : null,
+        esAdmin ? costosIndirectosCerdo : null,
+        esAdmin ? tipoCambio : null);
+    if (!esAdmin)
+        proyeccion.LimpiarDatosFinancieros();
     return Results.Ok(proyeccion);
 });
 
@@ -403,9 +447,12 @@ app.MapGet("/api/v1/tareas", async (
     string? tipo, 
     string? estado, 
     string? rol, 
+    ClaimsPrincipal user,
     WEB.Services.AgroPigDataService dataService) =>
 {
-    var data = await dataService.GetCalendarioPageDataAsync(fecha, mes, anio, tipo, estado, rol);
+    var callerRol = user.FindFirstValue(ClaimTypes.Role);
+    var callerNombre = user.FindFirstValue(ClaimTypes.Name);
+    var data = await dataService.GetCalendarioPageDataAsync(fecha, mes, anio, tipo, estado, rol, callerRol, callerNombre);
     return Results.Ok(new
     {
         fechaSeleccionada = data.FechaSeleccionada,
@@ -451,9 +498,11 @@ app.MapDelete("/api/v1/tareas/{id:guid}", async (Guid id, WEB.Services.AgroPigDa
 }).RequireAuthorization(WEB.Security.Policies.TareasGestionar);
 
 // Centro de Notificaciones en vivo
-app.MapGet("/api/v1/notificaciones", async (WEB.Services.AgroPigDataService dataService) =>
+app.MapGet("/api/v1/notificaciones", async (ClaimsPrincipal user, WEB.Services.AgroPigDataService dataService) =>
 {
-    var notificaciones = await dataService.GetNotificacionesActivasAsync();
+    var notificaciones = await dataService.GetNotificacionesActivasAsync(
+        user.FindFirstValue(ClaimTypes.Role),
+        user.FindFirstValue(ClaimTypes.Name));
     return Results.Ok(new
     {
         total = notificaciones.Count,
@@ -463,9 +512,9 @@ app.MapGet("/api/v1/notificaciones", async (WEB.Services.AgroPigDataService data
 }).RequireAuthorization();
 
 // Resolver / descartar notificación
-app.MapPost("/api/v1/notificaciones/{id:guid}/resolver", async (Guid id, WEB.Services.AgroPigDataService dataService) =>
+app.MapPost("/api/v1/notificaciones/{id:guid}/resolver", async (Guid id, ClaimsPrincipal user, WEB.Services.AgroPigDataService dataService) =>
 {
-    var ok = await dataService.ResolverNotificacionAsync(id);
+    var ok = await dataService.ResolverNotificacionAsync(id, user.FindFirstValue(ClaimTypes.Role));
     return ok ? Results.Ok(new { status = "success" }) : Results.NotFound();
 }).RequireAuthorization();
 

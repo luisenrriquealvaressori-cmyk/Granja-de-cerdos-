@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.porciapp"
         minSdk = 29
         targetSdk = 37
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 7
+        versionName = "2.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

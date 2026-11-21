@@ -74,7 +74,9 @@ data class FeedSupplyRecord(
     val operario: String,
     val notasConsumo: List<String>,
     val observacionAdicional: String,
-    val sincronizado: Boolean = false
+    val sincronizado: Boolean = false,
+    val siloCodigo: String = "",
+    val horarioToma: String = ""
 ) {
     val racionPorAnimal: Double get() = if (animalesCount > 0) cantidadKg / animalesCount else 0.0
 }

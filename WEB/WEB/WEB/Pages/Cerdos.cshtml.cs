@@ -20,6 +20,7 @@ public class CerdosModel : PageModel
     }
 
     public CerdosPageViewModel Data { get; set; } = new();
+    public CatalogosFormularioWebViewModel Catalogos { get; set; } = new();
 
     [BindProperty(SupportsGet = true)]
     public string? EtapaFiltro { get; set; }
@@ -36,6 +37,7 @@ public class CerdosModel : PageModel
     public async Task OnGetAsync()
     {
         Data = await _dataService.GetCerdosPageDataAsync(EtapaFiltro, Busqueda);
+        Catalogos = await _dataService.GetCatalogosFormularioWebAsync();
     }
 
     [RequierePolitica(Policies.CerdosEditar)]

@@ -19,6 +19,11 @@ class SyncWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val repository = FarmRepository(applicationContext)
 
+        if (repository.sessionManager.valid() == null) {
+            Log.i(tag, "Sincronización en espera: inicia sesión para enviar registros pendientes.")
+            return@withContext Result.success()
+        }
+
         try {
             when (val res = repository.syncOutboxNow()) {
                 is FarmRepository.DirectSyncResult.NoPending -> {

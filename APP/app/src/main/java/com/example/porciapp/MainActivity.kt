@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.porciapp.data.model.UserProfile
 import com.example.porciapp.data.model.UserRole
+import com.example.porciapp.data.model.WorkspaceUiPreferences
 import com.example.porciapp.data.repository.FarmRepository
 import com.example.porciapp.data.sync.SyncManager
 import com.example.porciapp.ui.components.FieldBottomNavBar
@@ -55,11 +56,16 @@ class MainActivity : ComponentActivity() {
                 val activeRole = activeSession?.rol ?: UserRole.ADMINISTRADOR
                 val activeProfile = activeSession?.toProfile() ?: UserProfile.defaultFor(activeRole)
 
-                // Sincronizar automáticamente el catálogo y las tareas desde el servidor al iniciar con sesión activa
+                // Sincronizar automáticamente el catálogo, tareas y cola pendiente desde el servidor al iniciar con sesión activa
                 LaunchedEffect(activeSession?.token) {
                     if (activeSession != null && !activeSession!!.isExpired()) {
                         try {
                             farmRepository.refreshCatalog()
+                        } catch (_: Exception) {}
+                        try {
+                            if (farmRepository.getPendingCount() > 0) {
+                                farmRepository.syncOutboxNow()
+                            }
                         } catch (_: Exception) {}
                     }
                 }
@@ -71,13 +77,32 @@ class MainActivity : ComponentActivity() {
                 val lechonesHoy by farmRepository.lechonesHoyFlow.collectAsState(initial = 0)
                 val alimentoKgHoy by farmRepository.alimentoKgHoyFlow.collectAsState(initial = 0.0)
                 val tratamientosHoy by farmRepository.tratamientosHoyFlow.collectAsState(initial = 0)
-                val registrosOperaciones by farmRepository.operacionesGastosFlow.collectAsState(initial = emptyList())
+                val registrosOperaciones by remember(activeRole) {
+                    farmRepository.getOperacionesForRoleFlow(activeRole)
+                }.collectAsState(initial = emptyList())
                 val tareasPendientes by farmRepository.tareasPendientesCount.collectAsState(initial = 0)
-                val notificacionesNoLeidas by farmRepository.notificacionesNoLeidasCount.collectAsState(initial = 0)
                 val listaTareas by farmRepository.tareasFlow.collectAsState(initial = emptyList())
                 val listaBajas by farmRepository.bajasFlow.collectAsState(initial = emptyList())
-                val listaNotificaciones by farmRepository.notificacionesFlow.collectAsState(initial = emptyList())
+                val listaNotificaciones by remember(activeRole) {
+                    farmRepository.getNotificacionesForRoleFlow(activeRole)
+                }.collectAsState(initial = emptyList())
+                val notificacionesNoLeidas = remember(listaNotificaciones) { listaNotificaciones.count { !it.leida } }
                 val cerdosDb by farmRepository.cerdosFlow.collectAsState(initial = emptyList())
+
+                // Flujos de catálogos maestros y preferencias de UI personalizables por rol
+                val galponesCat by farmRepository.galponesCatFlow.collectAsState(initial = emptyList())
+                val jaulasCat by farmRepository.jaulasCatFlow.collectAsState(initial = emptyList())
+                val insumosCat by farmRepository.insumosCatFlow.collectAsState(initial = emptyList())
+                val laboresCat by farmRepository.laboresCatFlow.collectAsState(initial = emptyList())
+                val horariosCat by farmRepository.horariosCatFlow.collectAsState(initial = emptyList())
+                val operariosCat by farmRepository.operariosCatFlow.collectAsState(initial = emptyList())
+                val clinicosCat by farmRepository.clinicosCatFlow.collectAsState(initial = emptyList())
+                val uiPrefsFlow = remember(activeProfile.id, activeRole) {
+                    farmRepository.getUiPreferencesFlow(activeProfile.id, activeRole)
+                }
+                val uiPrefs by uiPrefsFlow.collectAsState(
+                    initial = WorkspaceUiPreferences.defaultFor(activeRole)
+                )
 
                 // Interceptar botón atrás de hardware/gestos
                 BackHandler(enabled = currentScreen != Screen.Dashboard && currentScreen != Screen.Login) {
@@ -112,9 +137,10 @@ class MainActivity : ComponentActivity() {
                             Screen.FeedSupply, Screen.FeedList -> "alimento"
                             Screen.Treatment, Screen.Health -> "sanidad"
                             Screen.ReproductiveEvent -> "partos"
-                            Screen.FieldOperations -> if (activeRole == com.example.porciapp.data.model.UserRole.OPERARIO) "labores" else "gastos"
+                            Screen.FieldOperations -> if (activeRole == UserRole.OPERARIO) "labores" else "gastos"
                             Screen.TasksSchedule -> "tareas"
                             Screen.Animals -> "animales"
+                            Screen.Mortality -> "bajas"
                             else -> "inicio"
                         }
 
@@ -126,6 +152,7 @@ class MainActivity : ComponentActivity() {
                             FieldBottomNavBar(
                                 selectedTabId = currentTabId,
                                 activeRole = activeRole,
+                                customTabIds = uiPrefs.navInferior,
                                 onTabSelectedById = { tabId ->
                                     currentScreen = when (tabId) {
                                         "inicio" -> Screen.Dashboard
@@ -135,6 +162,7 @@ class MainActivity : ComponentActivity() {
                                         "labores", "gastos" -> Screen.FieldOperations
                                         "tareas" -> Screen.TasksSchedule
                                         "animales" -> Screen.Animals
+                                        "bajas" -> Screen.Mortality
                                         else -> Screen.Dashboard
                                     }
                                 }
@@ -172,9 +200,17 @@ class MainActivity : ComponentActivity() {
                                         selectedTabIndex = 0
                                         coroutineScope.launch {
                                             snackbarHostState.showSnackbar("Bienvenido(a), ${profile.nombre} (${role.titulo})")
-                                            // Refrescar catálogo de forma asíncrona
+                                            // Limpiar caché del perfil anterior y refrescar catálogo del rol actual
+                                            try {
+                                                farmRepository.clearRoleScopedCache()
+                                            } catch (_: Exception) {}
                                             try {
                                                 farmRepository.refreshCatalog()
+                                            } catch (_: Exception) {}
+                                            try {
+                                                if (farmRepository.getPendingCount() > 0) {
+                                                    farmRepository.syncOutboxNow()
+                                                }
                                             } catch (_: Exception) {}
                                         }
                                     }
@@ -193,8 +229,29 @@ class MainActivity : ComponentActivity() {
                                     notificaciones = listaNotificaciones,
                                     tareas = listaTareas,
                                     cerdosFromDb = cerdosDb,
+                                    operacionesGastos = registrosOperaciones,
+                                    galponesCatalog = galponesCat,
+                                    horariosCatalog = horariosCat,
+                                    insumosCatalog = insumosCat,
                                     activeRole = activeRole,
                                     activeProfile = activeProfile,
+                                    uiPrefs = uiPrefs,
+                                    onSaveUiPreferences = { prefs ->
+                                        coroutineScope.launch {
+                                            farmRepository.updateUiPreferences(activeProfile.id, activeRole, prefs)
+                                            snackbarHostState.showSnackbar("Interfaz personalizada guardada")
+                                        }
+                                    },
+                                    onResetUiPreferences = {
+                                        coroutineScope.launch {
+                                            farmRepository.updateUiPreferences(
+                                                activeProfile.id,
+                                                activeRole,
+                                                WorkspaceUiPreferences.defaultFor(activeRole)
+                                            )
+                                            snackbarHostState.showSnackbar("Interfaz restaurada a valores del rol ${activeRole.titulo}")
+                                        }
+                                    },
                                     onRoleChanged = { /* El rol lo define el token del servidor */ },
                                     onNavigateToTreatment = { currentScreen = Screen.Treatment },
                                     onNavigateToReproductiveEvent = { currentScreen = Screen.ReproductiveEvent },
@@ -229,10 +286,19 @@ class MainActivity : ComponentActivity() {
                                             syncAndNotify("Reintento de cola")
                                         }
                                     },
+                                    onDiscardFailed = {
+                                        coroutineScope.launch {
+                                            farmRepository.discardFailedSync()
+                                            snackbarHostState.showSnackbar("Registros con error descartados de la cola local")
+                                        }
+                                    },
                                     onLogout = {
                                         farmRepository.sessionManager.clear()
                                         currentScreen = Screen.Login
                                         coroutineScope.launch {
+                                            try {
+                                                farmRepository.clearRoleScopedCache()
+                                            } catch (_: Exception) {}
                                             snackbarHostState.showSnackbar("Turno finalizado y sesión cerrada")
                                         }
                                     }
@@ -241,6 +307,12 @@ class MainActivity : ComponentActivity() {
                             is Screen.Treatment -> {
                                 TreatmentScreen(
                                     activeProfile = activeProfile,
+                                    insumosCatalog = insumosCat,
+                                    clinicosCatalog = clinicosCat,
+                                    galponesCatalog = galponesCat,
+                                    jaulasCatalog = jaulasCat,
+                                    cerdosFromDb = cerdosDb,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = { currentScreen = Screen.Dashboard },
                                     onSaveRecord = { record ->
                                         coroutineScope.launch {
@@ -254,6 +326,11 @@ class MainActivity : ComponentActivity() {
                             is Screen.ReproductiveEvent -> {
                                 ReproductiveEventScreen(
                                     activeProfile = activeProfile,
+                                    clinicosCatalog = clinicosCat,
+                                    horariosCatalog = horariosCat,
+                                    jaulasCatalog = jaulasCat,
+                                    cerdosFromDb = cerdosDb,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = { currentScreen = Screen.Dashboard },
                                     onSaveRecord = { record ->
                                         coroutineScope.launch {
@@ -267,6 +344,10 @@ class MainActivity : ComponentActivity() {
                             is Screen.FeedSupply -> {
                                 FeedSupplyScreen(
                                     activeProfile = activeProfile,
+                                    galponesCatalog = galponesCat,
+                                    insumosCatalog = insumosCat,
+                                    horariosCatalog = horariosCat,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = { currentScreen = Screen.Dashboard },
                                     onSaveRecord = { record ->
                                         coroutineScope.launch {
@@ -281,6 +362,10 @@ class MainActivity : ComponentActivity() {
                                 PigManagementScreen(
                                     activeProfile = activeProfile,
                                     cerdosFromDb = cerdosDb,
+                                    galponesCatalog = galponesCat,
+                                    jaulasCatalog = jaulasCat,
+                                    clinicosCatalog = clinicosCat,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = {
                                         currentScreen = Screen.Dashboard
                                         selectedTabIndex = 0
@@ -296,6 +381,12 @@ class MainActivity : ComponentActivity() {
                             is Screen.Health -> {
                                 TreatmentScreen(
                                     activeProfile = activeProfile,
+                                    insumosCatalog = insumosCat,
+                                    clinicosCatalog = clinicosCat,
+                                    galponesCatalog = galponesCat,
+                                    jaulasCatalog = jaulasCat,
+                                    cerdosFromDb = cerdosDb,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = {
                                         currentScreen = Screen.Dashboard
                                         selectedTabIndex = 0
@@ -313,6 +404,10 @@ class MainActivity : ComponentActivity() {
                             is Screen.FeedList -> {
                                 FeedSupplyScreen(
                                     activeProfile = activeProfile,
+                                    galponesCatalog = galponesCat,
+                                    insumosCatalog = insumosCat,
+                                    horariosCatalog = horariosCat,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = {
                                         currentScreen = Screen.Dashboard
                                         selectedTabIndex = 0
@@ -335,6 +430,12 @@ class MainActivity : ComponentActivity() {
                                         selectedTabIndex = 0
                                     },
                                     registrosGuardados = registrosOperaciones,
+                                    galponesCatalog = galponesCat,
+                                    laboresCatalog = laboresCat,
+                                    horariosCatalog = horariosCat,
+                                    operariosCatalog = operariosCat,
+                                    insumosCatalog = insumosCat,
+                                    uiPrefs = uiPrefs,
                                     onSaveRecord = { record ->
                                         coroutineScope.launch {
                                             farmRepository.saveOperacionGasto(record)
@@ -347,6 +448,11 @@ class MainActivity : ComponentActivity() {
                                 TasksScheduleScreen(
                                     activeProfile = activeProfile,
                                     tareas = listaTareas,
+                                    galponesCatalog = galponesCat,
+                                    laboresCatalog = laboresCat,
+                                    horariosCatalog = horariosCat,
+                                    operariosCatalog = operariosCat,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = {
                                         currentScreen = Screen.Dashboard
                                         selectedTabIndex = 0
@@ -369,6 +475,10 @@ class MainActivity : ComponentActivity() {
                                 MortalityScreen(
                                     activeProfile = activeProfile,
                                     historialBajas = listaBajas,
+                                    clinicosCatalog = clinicosCat,
+                                    galponesCatalog = galponesCat,
+                                    cerdosFromDb = cerdosDb,
+                                    uiPrefs = uiPrefs,
                                     onBackClick = {
                                         currentScreen = Screen.Dashboard
                                         selectedTabIndex = 0

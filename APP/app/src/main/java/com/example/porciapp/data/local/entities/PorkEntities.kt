@@ -76,7 +76,9 @@ data class ConsumoAlimentoEntity(
     val idOperario: String,
     val notasConsumo: String, // JSON o lista separada por comas
     val observacionAdicional: String,
-    val sincronizado: Boolean = false
+    val sincronizado: Boolean = false,
+    val siloCodigo: String? = null,
+    val horarioToma: String? = null
 )
 
 @Entity(tableName = "tareas")
@@ -176,4 +178,103 @@ data class SyncQueueEntity(
     val status: SyncStatus = SyncStatus.PENDING,
     val retryCount: Int = 0,
     val lastError: String? = null
+)
+
+// =========================================================================
+// CATÁLOGOS MAESTROS SINCRONIZADOS DESDE POSTGRESQL & PREFERENCIAS UI POR ROL
+// =========================================================================
+
+@Entity(tableName = "cat_galpones")
+data class CatGalponEntity(
+    @PrimaryKey val codigo: String,
+    val nombre: String,
+    val tipoSistema: String,
+    val capacidad: Int,
+    val temperaturaC: Double,
+    val humedadPct: Double
+)
+
+@Entity(tableName = "cat_jaulas")
+data class CatJaulaEntity(
+    @PrimaryKey val codigo: String,
+    val nombre: String,
+    val galponCodigo: String,
+    val galponNombre: String,
+    val etapaZootecnica: String,
+    val capacidadMaxima: Int,
+    val ocupacionActual: Int
+)
+
+@Entity(tableName = "cat_insumos")
+data class CatInsumoEntity(
+    @PrimaryKey val sku: String,
+    val id: String,
+    val nombre: String,
+    val categoriaCodigo: String,
+    val unidadMedida: String,
+    val stockActual: Double,
+    val stockMinimo: Double,
+    val costoUnitarioUsd: Double,
+    val siloCodigo: String
+)
+
+@Entity(tableName = "cat_labores")
+data class CatLaborEntity(
+    @PrimaryKey val codigo: String,
+    val nombre: String,
+    val tipoRegistro: String,
+    val categoria: String,
+    val etapaSugerida: String,
+    val galponSugerido: String,
+    val duracionSugerida: String,
+    val tarifaReferenciaNio: Double,
+    val centroCostoCodigo: String,
+    val rolSugerido: String,
+    val requiereInsumo: Boolean
+)
+
+@Entity(tableName = "cat_horarios")
+data class CatHorarioEntity(
+    @PrimaryKey val codigo: String,
+    val nombre: String,
+    val tipoHorario: String,
+    val horaInicio: String,
+    val horaFin: String,
+    val categoriaActividad: String,
+    val etapaAplicable: String,
+    val rolResponsable: String,
+    val prioridadDefault: String,
+    val descripcion: String
+)
+
+@Entity(tableName = "cat_operarios")
+data class CatOperarioEntity(
+    @PrimaryKey val id: String,
+    val nombreUsuario: String,
+    val nombre: String,
+    val rol: String,
+    val matricula: String
+)
+
+@Entity(tableName = "cat_clinico")
+data class CatClinicoEntity(
+    @PrimaryKey val codigo: String,
+    val tipoCatalogo: String,
+    val nombre: String,
+    val subcategoria: String,
+    val diasRetiroReferencia: Int
+)
+
+@Entity(tableName = "preferencias_ui_usuario")
+data class PreferenciaUiEntity(
+    @PrimaryKey val userKey: String,
+    val rolBase: String,
+    val modulosVisiblesJson: String,
+    val accionesRapidasJson: String,
+    val navInferiorJson: String,
+    val galponPredeterminado: String,
+    val turnoPredeterminado: String,
+    val monedaPreferida: String,
+    val modoCompacto: Boolean,
+    val updatedAtMs: Long
 )

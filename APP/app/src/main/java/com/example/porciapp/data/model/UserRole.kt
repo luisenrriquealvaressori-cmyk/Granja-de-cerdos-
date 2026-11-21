@@ -73,6 +73,12 @@ enum class UserRole(
     val puedeVerTareas: Boolean
         get() = true
 
+    val puedeProgramarTareas: Boolean
+        get() = this == ADMINISTRADOR || this == VETERINARIO
+
+    val puedeRegistrarBajas: Boolean
+        get() = this == ADMINISTRADOR || this == VETERINARIO
+
     companion object {
         /** Traduce el rol que entrega el servidor. Devuelve null si no se reconoce (se deniega el acceso). */
         fun fromServer(raw: String?): UserRole? = when (raw?.trim()?.lowercase()) {
@@ -127,6 +133,109 @@ data class UserProfile(
 
         /** Alias de compatibilidad */
         fun obtenerPerfilPorRol(role: UserRole): UserProfile = defaultFor(role)
+    }
+}
+
+/**
+ * Preferencias de interfaz personalizable según rol (sincronizadas con PostgreSQL y persistidas en SQLite).
+ */
+data class WorkspaceUiPreferences(
+    val rolBase: UserRole = UserRole.OPERARIO,
+    val modulosVisibles: List<String> = emptyList(),
+    val accionesRapidas: List<String> = emptyList(),
+    val navInferior: List<String> = emptyList(),
+    val galponPredeterminado: String = "",
+    val turnoPredeterminado: String = "TUR-MAN",
+    val monedaPreferida: String = "NIO",
+    val modoCompacto: Boolean = false,
+    val updatedAtMs: Long = 0L
+) {
+    fun hasModule(key: String): Boolean = modulosVisibles.isEmpty() || modulosVisibles.contains(key)
+
+    fun sanitizedFor(role: UserRole): WorkspaceUiPreferences {
+        val def = defaultFor(role)
+        val allowedModulos = allowedModulesFor(role)
+        val allowedActs = allowedActionsFor(role)
+        val allowedTabs = allowedNavTabsFor(role)
+
+        val mods = modulosVisibles.filter { it in allowedModulos }.distinct().ifEmpty { def.modulosVisibles }
+        val acts = accionesRapidas.filter { it in allowedActs }.distinct().take(4).toMutableList()
+        for (fb in def.accionesRapidas) {
+            if (acts.size < 4 && fb !in acts) acts.add(fb)
+        }
+        val nav = navInferior.filter { it in allowedTabs }.distinct().take(4).toMutableList()
+        if ("DASHBOARD" !in nav) {
+            nav.add(0, "DASHBOARD")
+            while (nav.size > 4) nav.removeAt(nav.lastIndex)
+        }
+        for (fb in def.navInferior) {
+            if (nav.size < 4 && fb !in nav) nav.add(fb)
+        }
+
+        val moneda = if (role == UserRole.ADMINISTRADOR && monedaPreferida.equals("USD", ignoreCase = true)) "USD" else "NIO"
+
+        return copy(
+            rolBase = role,
+            modulosVisibles = mods,
+            accionesRapidas = acts,
+            navInferior = nav,
+            galponPredeterminado = galponPredeterminado.trim(),
+            turnoPredeterminado = turnoPredeterminado.ifBlank { def.turnoPredeterminado },
+            monedaPreferida = moneda
+        )
+    }
+
+    companion object {
+        fun allowedModulesFor(role: UserRole): List<String> = if (role == UserRole.ADMINISTRADOR) {
+            listOf("ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO", "RESUMEN_FINANCIERO")
+        } else {
+            listOf("ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO")
+        }
+
+        fun allowedActionsFor(role: UserRole): List<String> = when (role) {
+            UserRole.ADMINISTRADOR -> listOf("FEED_SUPPLY", "REPRODUCTIVE_EVENT", "TREATMENT", "FIELD_OPERATIONS", "ANIMALS", "TASKS_SCHEDULE", "MORTALITY")
+            UserRole.VETERINARIO -> listOf("TREATMENT", "REPRODUCTIVE_EVENT", "MORTALITY", "TASKS_SCHEDULE", "ANIMALS", "FIELD_OPERATIONS")
+            UserRole.OPERARIO -> listOf("FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "ANIMALS")
+        }
+
+        fun allowedNavTabsFor(role: UserRole): List<String> = when (role) {
+            UserRole.ADMINISTRADOR -> listOf("DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "TREATMENT", "ANIMALS", "REPRODUCTIVE_EVENT")
+            UserRole.VETERINARIO -> listOf("DASHBOARD", "TREATMENT", "REPRODUCTIVE_EVENT", "TASKS_SCHEDULE", "ANIMALS", "MORTALITY")
+            UserRole.OPERARIO -> listOf("DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "ANIMALS")
+        }
+
+        fun defaultFor(role: UserRole): WorkspaceUiPreferences = when (role) {
+            UserRole.ADMINISTRADOR -> WorkspaceUiPreferences(
+                rolBase = UserRole.ADMINISTRADOR,
+                modulosVisibles = listOf("ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO", "RESUMEN_FINANCIERO"),
+                accionesRapidas = listOf("FEED_SUPPLY", "REPRODUCTIVE_EVENT", "TREATMENT", "FIELD_OPERATIONS"),
+                navInferior = listOf("DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE"),
+                galponPredeterminado = "",
+                turnoPredeterminado = "TUR-COMP",
+                monedaPreferida = "NIO",
+                modoCompacto = false
+            )
+            UserRole.VETERINARIO -> WorkspaceUiPreferences(
+                rolBase = UserRole.VETERINARIO,
+                modulosVisibles = listOf("ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO"),
+                accionesRapidas = listOf("TREATMENT", "REPRODUCTIVE_EVENT", "MORTALITY", "TASKS_SCHEDULE"),
+                navInferior = listOf("DASHBOARD", "TREATMENT", "REPRODUCTIVE_EVENT", "TASKS_SCHEDULE"),
+                galponPredeterminado = "GALP-01",
+                turnoPredeterminado = "TUR-COMP",
+                monedaPreferida = "NIO",
+                modoCompacto = false
+            )
+            UserRole.OPERARIO -> WorkspaceUiPreferences(
+                rolBase = UserRole.OPERARIO,
+                modulosVisibles = listOf("ACCIONES_RAPIDAS", "TAREAS_HOY", "METRICAS_VIVO", "SILOS_NIVEL", "BUSCADOR_CAMPO"),
+                accionesRapidas = listOf("FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE", "ANIMALS"),
+                navInferior = listOf("DASHBOARD", "FEED_SUPPLY", "FIELD_OPERATIONS", "TASKS_SCHEDULE"),
+                galponPredeterminado = "",
+                turnoPredeterminado = "TUR-MAN",
+                monedaPreferida = "NIO",
+                modoCompacto = false
+            )
+        }
     }
 }
 

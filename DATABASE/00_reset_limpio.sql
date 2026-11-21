@@ -15,6 +15,10 @@ DROP VIEW IF EXISTS v_resumen_bi_lotes_activos CASCADE;
 DROP VIEW IF EXISTS v_balance_kardex_silos CASCADE;
 DROP VIEW IF EXISTS v_analisis_costo_kg_producido CASCADE;
 
+DROP TABLE IF EXISTS preferencias_ui_usuario CASCADE;
+DROP TABLE IF EXISTS catalogo_clinico_sanitario CASCADE;
+DROP TABLE IF EXISTS catalogo_horarios_turnos CASCADE;
+DROP TABLE IF EXISTS catalogo_labores_campo CASCADE;
 DROP TABLE IF EXISTS registro_tratamientos_clinicos CASCADE;
 DROP TABLE IF EXISTS cerdos_individuales CASCADE;
 DROP TABLE IF EXISTS jaulas_corrales CASCADE;
@@ -934,6 +938,125 @@ SET nombre                 = EXCLUDED.nombre,
     debe_cambiar_password  = FALSE,
     intentos_fallidos      = 0,
     bloqueado_hasta        = NULL;
+
+-- ----------------------------------------------------------------------------
+-- 6. CATÁLOGOS MAESTROS OPERATIVOS, CLÍNICOS Y PREFERENCIAS UI POR ROL
+-- ----------------------------------------------------------------------------
+ALTER TABLE presupuestos_lote ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+INSERT INTO categorias_insumos (id, codigo, nombre, descripcion)
+VALUES ('e0000000-0000-0000-0000-000000000006', 'KIT', 'Instrumental & Kit Clínico', 'Jeringas descartables, agujas hipodérmicas, antisépticos tópicos, torundas y guantes')
+ON CONFLICT (codigo) DO UPDATE SET nombre = EXCLUDED.nombre;
+
+UPDATE insumos_catalogo
+SET categoria_id = (SELECT id FROM categorias_insumos WHERE codigo = 'KIT' LIMIT 1)
+WHERE codigo_sku IN ('MED-JER-05ML', 'MED-AGU-16G', 'MED-YOD-10', 'MED-TOR-ALG');
+
+INSERT INTO lineas_geneticas (nombre, casa_genetica, potencial_gmd_g_dia, fcr_teorico_objetivo, prolificidad_objetivo_nac_vivos, descripcion)
+VALUES
+    ('Pietrain Belga', 'Pietrain Seleccionado', 1040, 2.28, 11.5, 'Línea terminal macho de máximo rendimiento magro en canal'),
+    ('Duroc Talent', 'Duroc Internacional', 990, 2.36, 12.0, 'Semental rústico con excelente marmoleo, sabor y vigor al nacer'),
+    ('Landrace DanBred', 'DanBred', 950, 2.40, 15.8, 'Madre con sobresaliente instinto materno y producción lechera')
+ON CONFLICT (nombre) DO NOTHING;
+
+UPDATE jaulas_corrales j
+SET galpon_id = CASE
+    WHEN j.codigo LIKE 'J-MAT-%' OR j.codigo LIKE 'G1-J%' THEN (SELECT id FROM galpones_naves WHERE codigo = 'GALP-01' LIMIT 1)
+    WHEN j.codigo LIKE '%GEST%'                          THEN (SELECT id FROM galpones_naves WHERE codigo = 'GALP-02' LIMIT 1)
+    WHEN j.codigo LIKE 'C-PREC-%'                        THEN (SELECT id FROM galpones_naves WHERE codigo = 'GALP-03' LIMIT 1)
+    ELSE (SELECT id FROM galpones_naves WHERE codigo = 'GALP-04' LIMIT 1)
+END
+WHERE j.galpon_id IS NULL;
+
+INSERT INTO insumos_catalogo (
+    granja_id, categoria_id, codigo_sku, nombre, unidad_medida,
+    stock_actual, stock_minimo_seguridad, costo_unitario_promedio_usd, silo_deposito_id, estado_stock, activo
+)
+SELECT
+    'a0000000-0000-0000-0000-000000000001'::uuid,
+    c.id, d.sku, d.nombre, d.unidad, d.stock, d.stock_min, d.costo,
+    (SELECT s.id FROM silos_depositos s WHERE s.codigo = d.silo_codigo LIMIT 1), 'optimo', TRUE
+FROM (VALUES
+    ('ALIM', 'ALIM-ENG-F2',  'Concentrado Engorde Fase 2 Pelleteado',     'kg',    0.00,   3000.00, 0.7200, 'SILO-A1'),
+    ('ALIM', 'ALIM-CREC-F1', 'Concentrado Crecimiento Fase 1 Granulado',  'kg',    0.00,   2000.00, 0.7800, 'SILO-A1'),
+    ('PRE',  'PRE-INIC-F1',  'Preiniciador Fase 1 Micro-pellet Lechones', 'kg',    0.00,   1200.00, 1.0600, 'SILO-A2'),
+    ('PRE',  'PRE-INIC-F2',  'Preiniciador II Extruido',                  'kg',    0.00,   1500.00, 0.9400, 'SILO-A2'),
+    ('ALIM', 'ALIM-LACT-AD', 'Concentrado Lactancia Alta Densidad',       'kg',    0.00,   1500.00, 0.8100, 'SILO-B1'),
+    ('ALIM', 'ALIM-GEST-FIB','Alimento Gestación Multigrano Fibra Activa','kg',    0.00,   1200.00, 0.6600, 'SILO-B1'),
+    ('MED',  'MED-TIL-100',  'Tilmicosina 300mg/ml Frasco 100ml',         'ml',    500.00, 60.00,   0.2400, NULL),
+    ('MED',  'MED-VIT-100',  'Complejo B + Aminoácidos Frasco 100ml',     'ml',    900.00, 100.00,  0.0700, NULL),
+    ('MED',  'MED-OXIT-50',  'Oxitocina Sintética 10 UI/ml Frasco 50ml',  'ml',    400.00, 50.00,   0.1000, NULL),
+    ('MED',  'MED-PCV2-50',  'Vacuna Circovirus PCV2 + Mycoplasma 50 Dosis','dosis',250.00,40.00,   0.9500, NULL),
+    ('MED',  'MED-IVER-100', 'Ivermectina 1% Porcina Frasco 100ml',       'ml',    650.00, 80.00,   0.0900, NULL),
+    ('KIT',  'KIT-GUA-NIT',  'Guantes de Nitrilo Veterinarios (Par)',     'ud',    400.00, 50.00,   0.1800, NULL),
+    ('BIO',  'BIO-AMON-01',  'Amonio Cuaternario 5ta Gen. Desinfectante Galón','ml',12000.0,2000.00,0.0120, NULL),
+    ('BIO',  'BIO-CAL-25',   'Cal Hidratada Desinfección Pediluvios Saco 25kg','kg',500.00,100.00,  0.2800, NULL)
+) AS d(cat_codigo, sku, nombre, unidad, stock, stock_min, costo, silo_codigo)
+JOIN categorias_insumos c ON c.codigo = d.cat_codigo
+ON CONFLICT (codigo_sku) DO NOTHING;
+
+CREATE TABLE catalogo_labores_campo (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    granja_id UUID NOT NULL REFERENCES granjas(id) ON DELETE CASCADE,
+    codigo VARCHAR(40) NOT NULL UNIQUE,
+    nombre VARCHAR(120) NOT NULL,
+    tipo_registro VARCHAR(30) NOT NULL,
+    categoria VARCHAR(50) NOT NULL,
+    etapa_sugerida VARCHAR(60),
+    galpon_sugerido VARCHAR(30),
+    duracion_sugerida VARCHAR(40),
+    tarifa_referencia_nio NUMERIC(12,2) NOT NULL DEFAULT 0,
+    centro_costo_codigo VARCHAR(20),
+    rol_sugerido VARCHAR(40),
+    requiere_insumo BOOLEAN NOT NULL DEFAULT FALSE,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    orden INT NOT NULL DEFAULT 100,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE catalogo_horarios_turnos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    granja_id UUID NOT NULL REFERENCES granjas(id) ON DELETE CASCADE,
+    codigo VARCHAR(40) NOT NULL UNIQUE,
+    nombre VARCHAR(120) NOT NULL,
+    tipo_horario VARCHAR(30) NOT NULL,
+    hora_inicio VARCHAR(10) NOT NULL,
+    hora_fin VARCHAR(10),
+    categoria_actividad VARCHAR(40),
+    etapa_aplicable VARCHAR(60),
+    rol_responsable VARCHAR(40),
+    prioridad_default VARCHAR(20) NOT NULL DEFAULT 'Media',
+    descripcion VARCHAR(250),
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    orden INT NOT NULL DEFAULT 100
+);
+
+CREATE TABLE catalogo_clinico_sanitario (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    granja_id UUID NOT NULL REFERENCES granjas(id) ON DELETE CASCADE,
+    codigo VARCHAR(40) NOT NULL UNIQUE,
+    tipo_catalogo VARCHAR(35) NOT NULL,
+    nombre VARCHAR(120) NOT NULL,
+    subcategoria VARCHAR(60),
+    dias_retiro_referencia INT NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    orden INT NOT NULL DEFAULT 100
+);
+
+CREATE TABLE preferencias_ui_usuario (
+    usuario_id UUID PRIMARY KEY REFERENCES usuarios_operadores(id) ON DELETE CASCADE,
+    rol_base VARCHAR(40) NOT NULL,
+    modulos_visibles_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    acciones_rapidas_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    nav_inferior_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    galpon_predeterminado VARCHAR(30),
+    turno_predeterminado VARCHAR(40),
+    moneda_preferida VARCHAR(10) NOT NULL DEFAULT 'NIO',
+    modo_compacto BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Nota: ejecuta DATABASE/05_catalogos_operativos_y_roles.sql para poblar catálogos maestros actualizados.
 
 -- ============================================================================
 -- FIN DEL RESET LIMPIO. BASE DE DATOS PREPARADA CON CERO DATOS FICTICIOS.

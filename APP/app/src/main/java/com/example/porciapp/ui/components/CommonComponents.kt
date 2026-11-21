@@ -9,6 +9,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -16,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.example.porciapp.data.model.UserRole
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +32,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,7 +69,7 @@ fun TactileCard(
             .border(BorderStroke(borderWidth, borderColor), shape)
             .padding(14.dp)
     ) {
-        Column(content = content)
+        Column(modifier = Modifier.fillMaxWidth(), content = content)
     }
 }
 
@@ -85,6 +90,7 @@ fun TactileButton(
     cornerRadius: Dp = 14.dp,
     shadowOffset: Dp = 2.dp,
     enabled: Boolean = true,
+    compact: Boolean = false,
     trailingIcon: ImageVector? = null,
     content: (@Composable RowScope.() -> Unit)? = null
 ) {
@@ -118,7 +124,10 @@ fun TactileButton(
                 onClick = onClick
             )
             .heightIn(min = minHeight)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(
+                horizontal = if (compact) 12.dp else 16.dp,
+                vertical = if (compact) 8.dp else 10.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (content != null) {
@@ -128,39 +137,41 @@ fun TactileButton(
                 content = content
             )
         } else {
+            val iconSize = if (compact) 18.dp else 22.dp
+            val iconSpacing = if (compact) 6.dp else 8.dp
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
+                horizontalArrangement = Arrangement.Center
             ) {
                 if (icon != null) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = contentColor,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(iconSize)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(iconSpacing))
                 }
                 if (text != null) {
                     Text(
                         text = text,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = contentColor,
                         textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = if (icon != null || trailingIcon != null) Modifier.weight(1f, fill = false) else Modifier
+                        maxLines = if (compact) 1 else 2,
+                        softWrap = !compact,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                 }
                 if (trailingIcon != null) {
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(iconSpacing))
                     Icon(
                         imageVector = trailingIcon,
                         contentDescription = null,
                         tint = contentColor,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(iconSize)
                     )
                 }
             }
@@ -213,8 +224,8 @@ fun FieldTopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
-                    .padding(horizontal = 14.dp),
+                    .heightIn(min = 60.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -245,15 +256,15 @@ fun FieldTopBar(
                         modifier = Modifier
                             .size(46.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(FieldSurfaceContainerLowest)
+                            .background(Color(0xFF283A13))
                             .border(BorderStroke(2.dp, FieldPrimary.copy(alpha = 0.5f)), RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Image(
                             painter = painterResource(id = com.example.porciapp.R.drawable.app_logo),
                             contentDescription = "Logo Porky Gestión",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.size(38.dp)
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
@@ -284,18 +295,20 @@ fun FieldTopBar(
                         fontWeight = FontWeight.Bold,
                         color = FieldOnSurfaceVariant,
                         maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = FieldPrimary,
                         maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -401,7 +414,7 @@ fun FieldTopBar(
                             .clip(RoundedCornerShape(8.dp))
                             .background(FieldSurfaceContainerHigh)
                             .border(BorderStroke(2.dp, FieldDarkBorder), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -421,7 +434,9 @@ fun FieldTopBar(
                             text = statusText,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = FieldOnSurface
+                            color = FieldOnSurface,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -435,6 +450,7 @@ fun FieldTopBar(
  * Hero Branding Card with centered official Porky Gestión logo, responsive sizing,
  * and adaptive layout taking into account different screen sizes and insets.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PorkyHeroBrandCard(
     activeProfile: com.example.porciapp.data.model.UserProfile,
@@ -462,15 +478,14 @@ fun PorkyHeroBrandCard(
                 modifier = Modifier
                     .size(96.dp)
                     .clip(RoundedCornerShape(22.dp))
-                    .background(FieldSurfaceContainerHigh)
-                    .border(BorderStroke(2.dp, FieldPrimary), RoundedCornerShape(22.dp))
-                    .padding(6.dp),
+                    .background(Color(0xFF283A13))
+                    .border(BorderStroke(2.dp, FieldPrimary), RoundedCornerShape(22.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(id = com.example.porciapp.R.drawable.ic_porky_badge),
+                    painter = painterResource(id = com.example.porciapp.R.drawable.app_logo),
                     contentDescription = "Logo Porky Gestión App Móvil",
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -499,10 +514,10 @@ fun PorkyHeroBrandCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Adaptive metadata badges row (Location & Sync status)
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Surface(
                     color = FieldSurfaceContainerHigh,
@@ -528,8 +543,6 @@ fun PorkyHeroBrandCard(
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.width(8.dp))
 
                 Surface(
                     color = if (pendingCount > 0) FieldWarningContainer.copy(alpha = 0.2f) else FieldGreenPositive.copy(alpha = 0.15f),
@@ -679,14 +692,15 @@ fun GloveFriendlyStepper(
             enabled = decrementEnabled,
             backgroundColor = FieldSurfaceContainerLowest,
             contentColor = FieldDarkBorder,
-            minHeight = 64.dp,
-            modifier = Modifier.width(76.dp)
+            minHeight = 58.dp,
+            compact = true,
+            modifier = Modifier.width(60.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Remove,
                 contentDescription = "Disminuir",
                 tint = FieldDarkBorder,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(28.dp)
             )
         }
 
@@ -694,32 +708,39 @@ fun GloveFriendlyStepper(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .height(64.dp)
+                .heightIn(min = 58.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(FieldSurfaceContainerLowest)
                 .border(BorderStroke(2.dp, FieldDarkBorder), RoundedCornerShape(10.dp))
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.Center
+                ) {
                     Text(
                         text = valueText,
-                        style = MaterialTheme.typography.displayLarge,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Black,
                         color = valueColor,
-                        letterSpacing = (-1).sp
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (unitText != null) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = unitText,
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = FieldPrimary
+                            color = FieldPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -728,7 +749,9 @@ fun GloveFriendlyStepper(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = FieldOnSurfaceVariant,
-                    lineHeight = 11.sp
+                    lineHeight = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -739,14 +762,15 @@ fun GloveFriendlyStepper(
             enabled = incrementEnabled,
             backgroundColor = FieldPrimaryContainer,
             contentColor = FieldOnPrimary,
-            minHeight = 64.dp,
-            modifier = Modifier.width(76.dp)
+            minHeight = 58.dp,
+            compact = true,
+            modifier = Modifier.width(60.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
                 contentDescription = "Aumentar",
                 tint = FieldOnPrimary,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(28.dp)
             )
         }
     }
@@ -775,7 +799,7 @@ fun QuickPill(
 
     Box(
         modifier = modifier
-            .height(44.dp)
+            .heightIn(min = 42.dp)
             .drawBehind {
                 drawRoundRect(
                     color = FieldDarkBorder,
@@ -787,14 +811,17 @@ fun QuickPill(
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
             .border(BorderStroke(2.dp, FieldDarkBorder), RoundedCornerShape(8.dp))
-            .bounceClick(scaleDown = 0.93f, onClick = onClick),
+            .bounceClick(scaleDown = 0.93f, onClick = onClick)
+            .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
-            color = contentColor
+            color = contentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -820,29 +847,41 @@ fun FieldBottomNavBar(
     onTabSelectedById: (String) -> Unit = {},
     selectedTabIndex: Int = 0,
     onTabSelected: (Int) -> Unit = {},
-    activeRole: com.example.porciapp.data.model.UserRole = com.example.porciapp.data.model.UserRole.ADMINISTRADOR
+    activeRole: UserRole = UserRole.ADMINISTRADOR,
+    customTabIds: List<String> = emptyList()
 ) {
-    val tabs = remember(activeRole) {
-        when (activeRole) {
-            com.example.porciapp.data.model.UserRole.OPERARIO -> listOf(
-                FieldNavTab("inicio", "Inicio", Icons.Default.Dashboard),
-                FieldNavTab("alimento", "Alimento", Icons.Default.Scale),
-                FieldNavTab("labores", "Labores", Icons.Default.Engineering),
-                FieldNavTab("tareas", "Tareas", Icons.Default.AssignmentTurnedIn)
-            )
-            com.example.porciapp.data.model.UserRole.VETERINARIO -> listOf(
-                FieldNavTab("inicio", "Inicio", Icons.Default.Dashboard),
-                FieldNavTab("sanidad", "Aplicar", Icons.Default.Vaccines),
-                FieldNavTab("partos", "Eventos", Icons.Default.ChildCare),
-                FieldNavTab("tareas", "Tareas", Icons.Default.AssignmentTurnedIn)
-            )
-            com.example.porciapp.data.model.UserRole.ADMINISTRADOR -> listOf(
-                FieldNavTab("inicio", "Inicio", Icons.Default.Dashboard),
-                FieldNavTab("alimento", "Alimento", Icons.Default.Scale),
-                FieldNavTab("gastos", "Labores", Icons.Default.Payments),
-                FieldNavTab("tareas", "Agenda", Icons.Default.AssignmentTurnedIn)
-            )
+    fun buildTabForServerKey(key: String, role: UserRole): FieldNavTab = when (key) {
+        "DASHBOARD", "inicio" -> FieldNavTab("inicio", "Inicio", Icons.Default.Dashboard)
+        "FEED_SUPPLY", "alimento" -> FieldNavTab("alimento", "Alimento", Icons.Default.Scale)
+        "FIELD_OPERATIONS", "labores", "gastos" ->
+            if (role == UserRole.OPERARIO) FieldNavTab("labores", "Labores", Icons.Default.Engineering)
+            else FieldNavTab("gastos", "Labores", Icons.Default.Payments)
+        "TASKS_SCHEDULE", "tareas" -> FieldNavTab(
+            "tareas",
+            if (role == UserRole.ADMINISTRADOR) "Agenda" else "Tareas",
+            Icons.Default.AssignmentTurnedIn
+        )
+        "TREATMENT", "sanidad" -> FieldNavTab("sanidad", "Sanidad", Icons.Default.Vaccines)
+        "REPRODUCTIVE_EVENT", "partos" -> FieldNavTab("partos", "Partos", Icons.Default.ChildCare)
+        "ANIMALS", "animales" -> FieldNavTab("animales", "Cerdos", Icons.Default.Pets)
+        "MORTALITY", "bajas" -> FieldNavTab("bajas", "Bajas", Icons.Default.ReportProblem)
+        else -> FieldNavTab("inicio", "Inicio", Icons.Default.Dashboard)
+    }
+
+    val tabs = remember(activeRole, customTabIds) {
+        val defaultKeys = com.example.porciapp.data.model.WorkspaceUiPreferences.defaultFor(activeRole).navInferior
+        val resolvedKeys = if (customTabIds.isNotEmpty()) {
+            val allowed = com.example.porciapp.data.model.WorkspaceUiPreferences.allowedNavTabsFor(activeRole)
+            val filtered = customTabIds.filter { it in allowed }.distinct().take(4).toMutableList()
+            if ("DASHBOARD" !in filtered) filtered.add(0, "DASHBOARD")
+            for (fb in defaultKeys) {
+                if (filtered.size < 4 && fb !in filtered) filtered.add(fb)
+            }
+            filtered.take(4)
+        } else {
+            defaultKeys
         }
+        resolvedKeys.map { buildTabForServerKey(it, activeRole) }
     }
 
     val roleAccent = when (activeRole) {
@@ -872,9 +911,9 @@ fun FieldBottomNavBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
+                    .heightIn(min = 62.dp)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabs.forEachIndexed { index, tab ->
@@ -884,53 +923,61 @@ fun FieldBottomNavBar(
                         onTabSelected(index)
                     }
 
-                    if (isSelected) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(roleAccent)
-                                .selectable(selected = isSelected, role = Role.Tab, onClick = onClickAction)
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = tab.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .selectable(selected = isSelected, role = Role.Tab, onClick = onClickAction)
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = null,
-                                tint = FieldOnSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Text(
-                                text = tab.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = FieldOnSurfaceVariant,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(roleAccent)
+                                    .selectable(selected = isSelected, role = Role.Tab, onClick = onClickAction)
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = tab.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .selectable(selected = isSelected, role = Role.Tab, onClick = onClickAction)
+                                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = null,
+                                    tint = FieldOnSurfaceVariant,
+                                    modifier = Modifier.size(21.dp)
+                                )
+                                Text(
+                                    text = tab.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = FieldOnSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
@@ -966,11 +1013,369 @@ fun AuditWarningBanner(
                 modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Text(
+                Text(
                 text = mensaje,
                 style = MaterialTheme.typography.bodySmall,
                 color = FieldOnSurface
             )
+        }
+    }
+}
+
+/**
+ * Ítem genérico para selectores conectados a catálogos SQLite / PostgreSQL.
+ */
+data class CatalogChoiceItem(
+    val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val badge: String = "",
+    val category: String = ""
+)
+
+/**
+ * Campo táctil de solo selección desde base de datos (evita captura por teclado propensa a errores).
+ */
+@Composable
+fun DatabaseSelectorField(
+    label: String,
+    selectedTitle: String,
+    selectedSubtitle: String = "",
+    selectedBadge: String = "",
+    placeholder: String = "Seleccionar de base de datos...",
+    leadingIcon: ImageVector = Icons.Default.Dataset,
+    enabled: Boolean = true,
+    compact: Boolean = false,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = FieldOnSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Surface(
+            color = if (enabled) FieldSurfaceContainerLowest else FieldSurfaceContainerHigh,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(
+                1.5.dp,
+                if (selectedTitle.isNotBlank()) FieldPrimary.copy(alpha = 0.65f) else FieldOutlineVariant
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = if (compact) 9.dp else 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = if (enabled) FieldPrimary else FieldOnSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedTitle.ifBlank { placeholder },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (selectedTitle.isNotBlank()) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selectedTitle.isNotBlank()) FieldOnSurface else FieldOnSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (selectedSubtitle.isNotBlank()) {
+                        Text(
+                            text = selectedSubtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = FieldOnSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (selectedBadge.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = FieldPrimaryContainer.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = selectedBadge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = FieldPrimary,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Abrir lista",
+                    tint = FieldOnSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Hoja modal inferior buscable para elegir registros reales de SQLite (animales, insumos, labores, jaulas, etc.).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchableCatalogBottomSheet(
+    title: String,
+    subtitle: String = "",
+    items: List<CatalogChoiceItem>,
+    selectedId: String = "",
+    categories: List<String> = emptyList(),
+    emptyMessage: String = "Sin registros en SQLite local. Sincroniza para descargar desde el servidor.",
+    onSelect: (CatalogChoiceItem) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var activeCategory by remember { mutableStateOf("Todas") }
+
+    val filtered = remember(items, query, activeCategory) {
+        val q = query.trim().lowercase()
+        items.filter { item ->
+            val catOk = activeCategory == "Todas" || item.category.equals(activeCategory, ignoreCase = true)
+            val queryOk = q.isBlank() ||
+                item.title.lowercase().contains(q) ||
+                item.subtitle.lowercase().contains(q) ||
+                item.id.lowercase().contains(q) ||
+                item.badge.lowercase().contains(q)
+            catOk && queryOk
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = FieldSurfaceContainerLowest,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = FieldOnSurface
+                    )
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = FieldOnSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Cerrar")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Filtrar en catálogo (${items.size})...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Limpiar")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            if (categories.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item {
+                        FilterChip(
+                            selected = activeCategory == "Todas",
+                            onClick = { activeCategory = "Todas" },
+                            label = { Text("Todas (${items.size})") }
+                        )
+                    }
+                    items(categories) { cat ->
+                        FilterChip(
+                            selected = activeCategory == cat,
+                            onClick = { activeCategory = cat },
+                            label = { Text(cat) }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (filtered.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = emptyMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FieldOnSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(filtered, key = { "${it.id}-${it.title}" }) { item ->
+                        val isSelected = selectedId.isNotBlank() && item.id.equals(selectedId, ignoreCase = true)
+                        Surface(
+                            color = if (isSelected) FieldPrimaryContainer.copy(alpha = 0.18f) else FieldSurfaceContainerLow,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(
+                                if (isSelected) 1.5.dp else 1.dp,
+                                if (isSelected) FieldPrimary else FieldOutlineVariant
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onSelect(item)
+                                    onDismiss()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = FieldOnSurface
+                                    )
+                                    if (item.subtitle.isNotBlank()) {
+                                        Text(
+                                            text = item.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = FieldOnSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (item.badge.isNotBlank()) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        color = FieldSurfaceContainerHigh,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = item.badge,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = FieldPrimary,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Seleccionado",
+                                        tint = FieldPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Selector rápido horizontal de horarios/turnos/tomas desde `cat_horarios`.
+ */
+@Composable
+fun ScheduleChipSelector(
+    label: String,
+    items: List<CatalogChoiceItem>,
+    selectedId: String,
+    onSelect: (CatalogChoiceItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = FieldOnSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(items, key = { it.id }) { item ->
+                val selected = item.id.equals(selectedId, ignoreCase = true)
+                FilterChip(
+                    selected = selected,
+                    onClick = { onSelect(item) },
+                    leadingIcon = if (selected) {
+                        { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    } else null,
+                    label = {
+                        Column {
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1
+                            )
+                            if (item.subtitle.isNotBlank()) {
+                                Text(
+                                    text = item.subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = FieldOnSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                )
+            }
         }
     }
 }
